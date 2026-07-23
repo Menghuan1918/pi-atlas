@@ -28,6 +28,7 @@ async function main(): Promise<void> {
   // Use a temp PI_CODING_AGENT_DIR so we don't touch the real ~/.pi
   const tempDir = mkdtempSync(join(tmpdir(), "pi-atlas-test-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
 
   const sessionId = "test-session-1";
   const tm = new TaskManager();

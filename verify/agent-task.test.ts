@@ -16,6 +16,7 @@ import {
   resolveAgent,
   MAX_AGENT_DEPTH,
 } from "../extensions/task/agent-task.js";
+import * as persistence from "../extensions/task/persistence.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 let pass = 0;
@@ -160,6 +161,7 @@ console.log("\nTest 3: createAgentTask parses JSON event stream (mock pi)");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-test-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
 
   const sessionId = "agent-session-1";
   const tm = taskManager; // use singleton (the tool reads from it)
@@ -199,7 +201,7 @@ console.log("\nTest 3: createAgentTask parses JSON event stream (mock pi)");
     assert(existsSync(finalTask!.sessionFile!), "session file exists on disk");
 
     // Output persisted to file
-    const tasksDir = join(tempDir, "tasks", sessionId);
+    const tasksDir = persistence.getTasksDir(sessionId);
     const outputFile = join(tasksDir, `output-${task.id}.log`);
     assert(existsSync(outputFile), "output file exists");
     const rawOutput = readFileSync(outputFile, "utf-8");
@@ -254,6 +256,7 @@ console.log("\nTest 5: CreateAgent nesting depth check");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-depth-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
   const sessionId = "depth-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-depth-sess-"));
 
@@ -289,6 +292,7 @@ console.log("\nTest 6: CreateAgent rejects empty prompt");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-empty-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
   const sessionId = "empty-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-empty-sess-"));
 
@@ -318,6 +322,7 @@ console.log("\nTest 7: ResumeTask rejects bash tasks");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-resume-bash-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
   const sessionId = "resume-bash-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-resume-bash-sess-"));
 
@@ -354,6 +359,7 @@ console.log("\nTest 8: ResumeTask rejects non-existent and running tasks");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-resume-misc-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
   const sessionId = "resume-misc-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-resume-misc-sess-"));
 
@@ -405,6 +411,7 @@ console.log("\nTest 9: ResumeTask creates child task from completed agent");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-resume-ok-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
   const sessionId = "resume-ok-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-resume-ok-sess-"));
 
@@ -463,6 +470,7 @@ console.log("\nTest 10: PI_ATLAS_TASK_DEPTH propagation");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-env-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
   const sessionId = "env-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-env-sess-"));
 
@@ -510,6 +518,8 @@ console.log("\nTest 11: real pi end-to-end (simple prompt)");
   // deleted.) Delete it so pi defaults to ~/.pi.
   const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
   delete process.env.PI_CODING_AGENT_DIR;
+  const savedAtlasDir = process.env.PI_ATLAS_DIR;
+  delete process.env.PI_ATLAS_DIR;
   const sessionId = "real-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-real-sess-"));
 
@@ -541,6 +551,7 @@ console.log("\nTest 11: real pi end-to-end (simple prompt)");
   } finally {
     process.argv[1] = savedArgv1;
     if (savedAgentDir !== undefined) process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+    if (savedAtlasDir !== undefined) process.env.PI_ATLAS_DIR = savedAtlasDir;
     rmSync(sessionDir, { recursive: true, force: true });
   }
 }
@@ -560,6 +571,7 @@ console.log("\nTest 12: resolveAgent finds agent definitions");
   );
 
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
 
   const resolved = resolveAgent(process.cwd(), "reviewer");
   assert(resolved !== null, "agent resolved");
@@ -582,6 +594,7 @@ console.log("\nTest 12b: usage.cost accumulation (object form)");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-usage-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
   const sessionId = "usage-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-usage-sess-"));
   taskManager.setSessionDepth(sessionId, 0);

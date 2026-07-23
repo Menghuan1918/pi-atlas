@@ -1,7 +1,7 @@
 /**
  * Persistence layer for the Task extension.
  *
- * Tasks are persisted under `~/.pi/tasks/<sessionId>/`:
+ * Tasks are persisted under `~/.pi/atlas/sessions/<sessionId>/task/`:
  *   - `tasks.json`          — array of task metadata
  *   - `output-<taskId>.log`  — full (untruncated) output for a task
  *
@@ -10,7 +10,7 @@
 
 import { mkdir, rename, readFile, writeFile, access, constants } from "node:fs/promises";
 import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAtlasSessionDir } from "../shared/atlas-paths.js";
 import type { Task } from "./types.js";
 
 const TASKS_FILE = "tasks.json";
@@ -39,11 +39,10 @@ function withWriteLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Resolve (and create) the tasks directory for a session.
+ * Resolve the tasks directory for a session: `~/.pi/atlas/sessions/<sid>/task/`.
  */
 export function getTasksDir(sessionId: string): string {
-  const dir = join(getAgentDir(), "tasks", sessionId);
-  return dir;
+  return join(getAtlasSessionDir(sessionId), "task");
 }
 
 /** Ensure a directory exists, creating it (and parents) as needed. */

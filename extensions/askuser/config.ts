@@ -1,36 +1,60 @@
 /**
- * askuser extension — session-level timeout configuration.
+ * AskUser extension — per-session timeout configuration.
  *
- * Configuration file locations (first found wins, project overrides global):
- *   1. Project-level: `<cwd>/.pi/askuser-config.json`     (overrides global)
- *   2. Global-level:  `<agentDir>/askuser-config.json`     (~/.pi/agent/askuser-config.json)
+ * Config file location:
+ *   `~/.pi/atlas/sessions/<sessionId>/askuser/config.json`
  *
  * Format: `{ "timeout": <seconds> }`
  *   - 0  → no timeout, wait indefinitely (the default)
  *   - >0 → timeout in seconds
  *
+ * The config file is created at `session_start` with a default value of `0`.
+ * Other extensions can overwrite the file at any time to change the timeout;
+ * the new value takes effect on the next `ask_user` call (re-read each time).
+ *
  * Missing, unreadable, or malformed config falls back to 0 (no timeout).
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getAtlasSessionDir } from "../shared/atlas-paths.js";
 
-const CONFIG_FILENAME = "askuser-config.json";
+const CONFIG_FILENAME = "config.json";
 
 /**
- * Parse `timeout` (seconds) from a config file.
- * Returns `undefined` when the file is missing, unreadable, malformed,
- * or does not contain a valid non-negative finite number.
+ * Get the askuser config directory: `~/.pi/atlas/sessions/<sid>/askuser/`.
  */
-function readTimeoutFile(filePath: string): number | undefined {
-	if (!existsSync(filePath)) return undefined;
+export function getAskUserConfigDir(sessionId: string): string {
+	return join(getAtlasSessionDir(sessionId), "askuser");
+}
+
+/**
+ * Get the askuser config file path: `~/.pi/atlas/sessions/<sid>/askuser/config.json`.
+ */
+export function getAskUserConfigPath(sessionId: string): string {
+	return join(getAskUserConfigDir(sessionId), CONFIG_FILENAME);
+}
+
+/**
+ * Load the askuser timeout (seconds) for a session.
+ *
+ * Re-reads the config file on every call (no caching) so other extensions
+ * can update the timeout mid-session. Returns `0` (no timeout) when the
+ * file is missing, unreadable, or malformed.
+ *
+ * @param sessionId  Current session ID.
+ * @returns Timeout in seconds; `0` means no timeout (wait indefinitely).
+ */
+export function loadTimeoutConfig(sessionId: string): number {
+	const filePath = getAskUserConfigPath(sessionId);
+	if (!existsSync(filePath)) return 0;
 
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(readFileSync(filePath, "utf-8"));
 	} catch {
-		// Malformed JSON — ignore and fall back to other sources / default.
-		return undefined;
+		// Malformed JSON — fall back to default.
+		return 0;
 	}
 
 	if (parsed !== null && typeof parsed === "object" && "timeout" in parsed) {
@@ -40,26 +64,24 @@ function readTimeoutFile(filePath: string): number | undefined {
 		}
 	}
 
-	return undefined;
+	return 0;
 }
 
 /**
- * Load the askuser timeout (seconds) from session-level config.
+ * Ensure the per-session askuser config directory and default config file
+ * exist. Called at `session_start` so other extensions know the path and can
+ * overwrite the file directly.
  *
- * Project-level config (`<cwd>/.pi/askuser-config.json`) overrides the global
- * config (`<agentDir>/askuser-config.json`). Missing or invalid config yields
- * the default of `0` (no timeout — wait indefinitely).
+ * If the config file already exists, it is NOT overwritten (preserves any
+ * pre-existing config, e.g. written by another extension before session_start).
  *
- * @param cwd      Current working directory (project root for project-level config).
- * @param agentDir Agent config directory (e.g. `~/.pi/agent/`), for global config.
- * @returns Timeout in seconds; `0` means no timeout.
+ * @param sessionId  Current session ID.
  */
-export function loadTimeoutConfig(cwd: string, agentDir: string): number {
-	const projectTimeout = readTimeoutFile(join(cwd, ".pi", CONFIG_FILENAME));
-	if (projectTimeout !== undefined) return projectTimeout;
-
-	const globalTimeout = readTimeoutFile(join(agentDir, CONFIG_FILENAME));
-	if (globalTimeout !== undefined) return globalTimeout;
-
-	return 0;
+export function ensureDefaultConfig(sessionId: string): void {
+	const dir = getAskUserConfigDir(sessionId);
+	const filePath = getAskUserConfigPath(sessionId);
+	if (!existsSync(filePath)) {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(filePath, JSON.stringify({ timeout: 0 }, null, 2), "utf-8");
+	}
 }
