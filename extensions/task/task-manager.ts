@@ -12,7 +12,6 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { join } from "node:path";
 import { unlink } from "node:fs/promises";
 
 import {
@@ -82,7 +81,7 @@ function killProcessTree(pid: number): Promise<void> {
 export class TaskManager {
   /** sessionId → (taskId → Task) */
   private tasks = new Map<string, Map<string, Task>>();
-  /** taskId → running ChildProcess */
+  /** taskId → running ChildProcess (bash or agent) */
   private processes = new Map<string, ChildProcess>();
   /** taskId → OutputAccumulator */
   private accumulators = new Map<string, OutputAccumulator>();
@@ -249,15 +248,25 @@ export class TaskManager {
   }
 
   /**
-   * Spawn a pi sub-process in JSON mode and parse the event stream.
+   * Spawn a pi sub-process in RPC mode and drive it via stdin commands.
    *
-   * The child runs with `--mode json -p` (single-turn JSON output). Session
-   * persistence is enabled (no `--no-session`) so the sub-session is saved
-   * to the isolated atlas sub-sessions directory. The JSON event stream is
-   * parsed line-by-line to accumulate messages and extract the session file path.
+   * The child runs as a persistent RPC process (`pi --mode rpc`). The prompt is
+   * sent as a `{type:"prompt"}` command on stdin; completion is detected via
+   * the `agent_settled` event on stdout. Unlike the old `--mode json -p`
+   * (single-turn, exit-code based), RPC mode stays alive — so the guard's
+   * follow-up injection can drive additional turns, and CancelTask can cleanly
+   * shut it down (SIGTERM → SIGKILL via killProcessTree).
    *
-   * `ask_user` is always excluded — sub-agents cannot prompt the user directly.
-   * If `resumeSid` is provided, `--session <sid>` restores the prior conversation.
+   * We spawn directly (not via RpcClient) so we control the binary path
+   * (supports both `pi` bin and mock scripts) and the process lifecycle.
+   * The RPC protocol is simple JSONL: write `{type:"prompt",...}
+` to stdin,
+   * read events from stdout line-by-line.
+   *
+   * Session persistence is enabled so the sub-session is saved to the isolated
+   * atlas sub-sessions directory. `ask_user` is always excluded — sub-agents
+   * cannot prompt the user directly. If `resumeSid` is provided, `--session
+   * <sid>` restores the prior conversation.
    */
   private spawnAgent(
     sessionId: string,
@@ -271,11 +280,9 @@ export class TaskManager {
       resumeSid?: string;
     },
   ): void {
-    // Build pi CLI arguments.
-    const args: string[] = ["--mode", "json", "-p"];
+    // Build pi CLI arguments (--mode rpc, no -p, no prompt as positional arg).
+    const args: string[] = ["--mode", "rpc"];
     args.push("--session-dir", options.sessionDir);
-    // Always exclude ask_user — sub-agents cannot interact with the user
-    // directly. They communicate questions via text output to the parent agent.
     args.push("--exclude-tools", "ask_user");
     if (options.resumeSid) {
       args.push("--session", options.resumeSid);
@@ -286,36 +293,29 @@ export class TaskManager {
     if (options.tools && options.tools.length > 0) {
       args.push("--tools", options.tools.join(","));
     }
-    // Prompt as the final positional argument.
-    args.push(options.prompt);
 
     const invocation = getPiInvocation(args);
-
-    // Propagate nesting depth to the child process.
     const childEnv = {
       ...process.env,
       PI_ATLAS_TASK_DEPTH: String(task.depth + 1),
     };
 
+    // Spawn with pipe stdin (RPC mode needs writable stdin for commands).
     const child = spawn(invocation.command, invocation.args, {
       cwd: task.cwd,
-      detached: true,
       env: childEnv,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
     this.processes.set(task.id, child);
 
     let settled = false;
     let buffer = "";
-    let stderrText = "";
-
     const messages: { role: string; content: { type: string; text?: string }[] }[] = [];
     this.agentMessages.set(task.id, messages);
-    // Session file path derived from the session header.
-    let sessionFile: string | undefined;
-    // Usage stats accumulated from message_end events.
     let usage: TaskUsage | undefined;
+    let sessionFile: string | undefined;
+    let stderrText = "";
 
     const processLine = (line: string): void => {
       if (!line.trim()) return;
@@ -323,26 +323,20 @@ export class TaskManager {
       try {
         event = JSON.parse(line) as Record<string, unknown>;
       } catch {
-        return; // not a valid JSON line — skip
+        return;
       }
-
       const type = event.type as string | undefined;
 
-      // Session header — derive session file path.
-      if (type === "session") {
-        const sid = event.id as string | undefined;
-        const ts = event.timestamp as string | undefined;
-        if (sid && ts) {
-          const fileTimestamp = ts.replace(/[:.]/g, "-");
-          sessionFile = join(options.sessionDir, `${fileTimestamp}_${sid}.jsonl`);
-        }
+      // Session file from get_state response.
+      if (type === "response" && event.command === "get_state") {
+        const data = event.data as Record<string, unknown> | undefined;
+        if (data?.sessionFile) sessionFile = data.sessionFile as string;
         return;
       }
 
       // message_end — accumulate the finalized message.
       if (type === "message_end" && event.message) {
         messages.push(event.message as { role: string; content: { type: string; text?: string }[] });
-        // Extract usage stats from assistant messages.
         const msg = event.message as Record<string, unknown>;
         if (msg.role === "assistant" && msg.usage) {
           const u = msg.usage as Record<string, number>;
@@ -351,7 +345,6 @@ export class TaskManager {
           usage.output += (u.output as number) || 0;
           usage.cacheRead += (u.cacheRead as number) || 0;
           usage.cacheWrite += (u.cacheWrite as number) || 0;
-          // pi-ai Usage.cost is an object { input, output, cacheRead, cacheWrite, total }
           const cost = u.cost as unknown;
           if (typeof cost === "number") {
             usage.cost += cost;
@@ -366,19 +359,29 @@ export class TaskManager {
         }
       }
 
-      // turn_end — capture toolResults as a fallback (older/newer pi versions
-      // may not emit toolResult messages via message_end).
+      // turn_end — capture toolResults as a fallback.
       if (type === "turn_end" && Array.isArray(event.toolResults)) {
         for (const tr of event.toolResults as { role: string; content: { type: string; text?: string }[] }[]) {
           messages.push(tr);
         }
       }
+
+      // agent_settled — prompt (including guard-driven follow-up turns) done.
+      if (type === "agent_settled" && !settled) {
+        settled = true;
+        task.sessionFile = sessionFile;
+        const finalText = extractFinalOutput(messages);
+        const outputOverride = finalText || "(no output)";
+        const status: TaskStatus = usage?.stopReason === "error" ? "failed" : "completed";
+        const exitCode = status === "failed" ? 1 : 0;
+        // Shut down the RPC process, then finalize.
+        this.shutdownRpcChild(task.id, child);
+        void this.finalizeTask(sessionId, task, status, exitCode, outputOverride, usage);
+      }
     };
 
     child.stdout?.on("data", (data: Buffer) => {
-      // Persist raw bytes to the accumulator (for the output file).
       accumulator.append(data);
-      // Parse lines for message accumulation.
       buffer += data.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
@@ -394,19 +397,12 @@ export class TaskManager {
       if (settled) return;
       settled = true;
       this.processes.delete(task.id);
-
-      // Process any remaining buffered line.
       if (buffer.trim()) processLine(buffer);
-
-      // Record the session file path on the task.
       task.sessionFile = sessionFile;
-
       if (signal === "SIGTERM" || signal === "SIGKILL") {
-        // Killed by cancel() — state is already set to cancelled.
-        this.finalizeTask(sessionId, task, "cancelled", undefined, extractFinalOutput(messages) || stderrText, usage);
+        this.finalizeTask(sessionId, task, "cancelled", undefined, extractFinalOutput(messages), usage);
       } else {
         const finalText = extractFinalOutput(messages);
-        // For failed tasks, include both the final output and stderr.
         const outputOverride = finalText || stderrText || "(no output)";
         const status: TaskStatus = code === 0 ? "completed" : "failed";
         this.finalizeTask(sessionId, task, status, code ?? 1, outputOverride, usage);
@@ -423,6 +419,40 @@ export class TaskManager {
 
     child.on("close", onExit);
     child.on("error", onError);
+
+    // Send get_state first (to capture sessionFile), then the prompt.
+    const sendCommands = (): void => {
+      const stateCmd = JSON.stringify({ type: "get_state", id: "req_0" }) + "\n";
+      const promptCmd = JSON.stringify({ type: "prompt", message: options.prompt, id: "req_1" }) + "\n";
+      child.stdin?.write(stateCmd + promptCmd, (err) => {
+        if (err && !settled) {
+          settled = true;
+          this.processes.delete(task.id);
+          accumulator.append(Buffer.from(err.message + "\n"));
+          this.finalizeTask(sessionId, task, "failed", 1, `Failed to send prompt: ${err.message}`, usage);
+        }
+      });
+    };
+    if (child.stdin?.writable) {
+      sendCommands();
+    } else {
+      child.stdin?.on("ready", sendCommands);
+    }
+  }
+
+  /**
+   * Shut down an RPC child process: close stdin, SIGTERM, then SIGKILL.
+   */
+  private shutdownRpcChild(taskId: string, child: ChildProcess): void {
+    this.processes.delete(taskId);
+    try {
+      child.stdin?.end();
+    } catch {
+      // Best-effort.
+    }
+    if (child.pid) {
+      void killProcessTree(child.pid);
+    }
   }
 
   private spawnBash(
@@ -617,7 +647,11 @@ export class TaskManager {
   // ---- cancellation ----
 
   /**
-   * Kill the process tree for a task and mark it as cancelled.
+   * Cancel a task and, if it's an agent task, recursively cancel all its
+   * child tasks (tasks whose parentId === this task's id).
+   *
+   * Killing is best-effort with a hard timeout: SIGTERM first, then SIGKILL
+   * after KILL_GRACE_MS if the process hasn't exited.
    */
   async cancel(sessionId: string, taskId: string): Promise<Task> {
     const task = this.getTask(sessionId, taskId);
@@ -628,13 +662,26 @@ export class TaskManager {
       return task; // already terminal — no-op
     }
 
-    const child = this.processes.get(taskId);
-    if (child?.pid) {
-      await killProcessTree(child.pid);
+    // Recursively cancel child tasks first (depth-first).
+    const children = this.listTasks(sessionId).filter(
+      (t) => t.parentId === taskId && t.status === "running",
+    );
+    await Promise.all(children.map((t) => this.cancel(sessionId, t.id)));
+
+    // Mark the task as cancelled BEFORE killing the process, so the child's
+    // exit handler (onExit/onClose) sees a terminal status and becomes a no-op
+    // instead of racing us to finalize as "failed".
+    await this.finalizeTask(sessionId, task, "cancelled");
+
+    const proc = this.processes.get(taskId);
+    if (proc) {
+      // Both bash and agent tasks use ChildProcess; kill the process tree.
+      if (proc.pid) {
+        await killProcessTree(proc.pid);
+      }
     }
     this.processes.delete(taskId);
 
-    await this.finalizeTask(sessionId, task, "cancelled");
     return task;
   }
 

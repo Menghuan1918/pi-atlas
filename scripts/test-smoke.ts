@@ -207,20 +207,36 @@ async function main(): Promise<void> {
       sendUserMessage: (msg: string) => {
         injectedMessage = msg;
       },
+      on: () => {},
     } as any;
+    const ctx = { sessionManager: { getSessionId: () => guardSession } } as any;
 
-    const handler = createGuardHandler(fakePi);
+    const guard = createGuardHandler(fakePi);
 
     // No running tasks → no injection
-    handler({ type: "agent_settled" }, { sessionManager: { getSessionId: () => guardSession } } as any);
+    guard.onSettle({ type: "agent_settled" }, ctx);
     assert(injectedMessage === null, "no injection when no running tasks");
 
     // Create a running task using the singleton (the guard handler uses it)
     const task = taskManager.createBashTask(guardSession, "sleep 5", process.cwd());
-    handler({ type: "agent_settled" }, { sessionManager: { getSessionId: () => guardSession } } as any);
+
+    // Normal completion (stopReason "stop") → guard still injects (regression)
+    guard.onTurnEnd({ message: { role: "assistant", stopReason: "stop" } } as any);
+    guard.onSettle({ type: "agent_settled" }, ctx);
     assert(injectedMessage !== null, "injected message when tasks running");
     assert(injectedMessage!.includes(task.id), "injected message contains task id");
     assert(injectedMessage!.includes("AwaitTask"), "injected message mentions AwaitTask");
+
+    // User interrupt (stopReason "aborted") → guard must NOT re-inject
+    injectedMessage = null;
+    guard.onTurnEnd({ message: { role: "assistant", stopReason: "aborted" } } as any);
+    guard.onSettle({ type: "agent_settled" }, ctx);
+    assert(injectedMessage === null, "no injection after user abort");
+
+    // After an aborted settle, a subsequent normal turn resumes injection
+    guard.onTurnEnd({ message: { role: "assistant", stopReason: "stop" } } as any);
+    guard.onSettle({ type: "agent_settled" }, ctx);
+    assert(injectedMessage !== null, "injection resumes after abort flag is consumed");
 
     await taskManager.cancel(guardSession, task.id);
   }

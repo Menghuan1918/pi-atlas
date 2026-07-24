@@ -57,10 +57,11 @@ function makeCtx(sessionId: string, sessionDir: string, cwd = process.cwd()): Ex
   } as unknown as ExtensionContext;
 }
 
-/** Write a mock pi that emits a JSON event stream and exits with `exitCode`. */
+/** Write a mock pi that implements the RPC protocol (reads stdin commands, emits stdout events). */
 function writeMockPi(dir: string, assistantText: string, exitCode = 0, extraEvents = ""): string {
   const script = `#!/usr/bin/env node
-// Mock pi: parse --session-dir, --session, --exclude-tools and emit JSON events.
+// Mock pi RPC: parse --session-dir, --session, --exclude-tools from CLI args.
+// Read JSON commands from stdin, emit events on stdout.
 const args = process.argv.slice(2);
 let sessionDir = ".";
 let resumeSession = "";
@@ -70,45 +71,60 @@ for (let i = 0; i < args.length; i++) {
   if (args[i] === "--session") resumeSession = args[i + 1];
   if (args[i] === "--exclude-tools") excludeTools = args[i + 1];
 }
-// Prompt is the last positional arg.
-const prompt = args[args.length - 1];
 
 const sid = resumeSession || require("crypto").randomUUID();
 const ts = new Date().toISOString();
 const fileTs = ts.replace(/[:.]/g, "-");
-
-// Session header
-console.log(JSON.stringify({ type: "session", version: 3, id: sid, timestamp: ts, cwd: sessionDir }));
-console.log(JSON.stringify({ type: "agent_start" }));
-console.log(JSON.stringify({ type: "turn_start" }));
-
-// Assistant message — append captured args for test verification
-const suffix = (resumeSession ? " [resumed=" + resumeSession + "]" : "") + (excludeTools ? " [excluded=" + excludeTools + "]" : "");
-const msg = {
-  role: "assistant",
-  content: [{ type: "text", text: ${JSON.stringify(assistantText)} + suffix }],
-  model: "mock-model",
-  usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0 } },
-  stopReason: "stop",
-  timestamp: Date.now(),
-};
-console.log(JSON.stringify({ type: "message_start", message: msg }));
-console.log(JSON.stringify({ type: "message_update", message: msg, assistantMessageEvent: { type: "text_delta", delta: ${JSON.stringify(assistantText)} } }));
-console.log(JSON.stringify({ type: "message_end", message: msg }));
-console.log(JSON.stringify({ type: "turn_end", message: msg, toolResults: [] }));
-console.log(JSON.stringify({ type: "agent_end", messages: [msg] }));
-console.log(JSON.stringify({ type: "agent_settled" }));
-${extraEvents}
+const sessionFile = sessionDir + "/" + fileTs + "_" + sid + ".jsonl";
 
 // Write a dummy session file so sessionFile derivation can be verified.
 try {
   const fs = require("fs");
-  const path = require("path");
-  const file = path.join(sessionDir, fileTs + "_" + sid + ".jsonl");
-  fs.writeFileSync(file, "mock session content\\n");
+  fs.writeFileSync(sessionFile, "mock session content\\n");
 } catch (e) {}
 
-process.exit(${exitCode});
+// Read JSON commands from stdin line-by-line.
+const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin });
+
+rl.on("line", (line) => {
+  let cmd;
+  try { cmd = JSON.parse(line); } catch { return; }
+
+  if (cmd.type === "prompt") {
+    // Respond to the prompt command.
+    process.stdout.write(JSON.stringify({ id: cmd.id, type: "response", command: "prompt", success: true }) + "\\n");
+
+    // Emit the agent event stream.
+    const suffix = (resumeSession ? " [resumed=" + resumeSession + "]" : "") + (excludeTools ? " [excluded=" + excludeTools + "]" : "");
+    const msg = {
+      role: "assistant",
+      content: [{ type: "text", text: ${JSON.stringify(assistantText)} + suffix }],
+      model: "mock-model",
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    };
+    process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "turn_start" }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "message_start", message: msg }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "message_end", message: msg }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "turn_end", message: msg, toolResults: [] }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "agent_end", messages: [msg] }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n");
+${extraEvents}
+    if (${exitCode} !== 0) process.exit(${exitCode});
+  }
+
+  if (cmd.type === "get_state") {
+    process.stdout.write(JSON.stringify({ id: cmd.id, type: "response", command: "get_state", success: true, data: { sessionFile, sessionId: sid } }) + "\\n");
+  }
+});
+
+rl.on("close", () => {
+  // stdin closed — shutdown.
+  process.exit(0);
+});
 `;
   const scriptPath = join(dir, "mock-pi.cjs");
   writeFileSync(scriptPath, script, { mode: 0o755 });

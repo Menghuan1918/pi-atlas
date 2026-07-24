@@ -2,10 +2,11 @@
  * Task extension entry point.
  *
  * Registers seven tools (CreateBash, CreateAgent, ResumeTask, AwaitTask,
- * CancelTask, ListTask, WatchTask) and three lifecycle event handlers:
+ * CancelTask, ListTask, WatchTask) and two lifecycle event handlers:
  *   - session_start    → restore persisted tasks, set nesting depth
- *   - agent_settled    → guard: remind the LLM about still-running tasks
  *   - session_shutdown → cancel all running tasks, persist final state
+ *
+ * The agent_settled/turn_end guard is handled by the `guard` extension.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -19,7 +20,6 @@ import {
   listTaskTool,
   watchTaskTool,
 } from "./control.js";
-import { createGuardHandler } from "./guard.js";
 
 export default function taskExtension(pi: ExtensionAPI): void {
   // ---- Tools ----
@@ -48,8 +48,9 @@ export default function taskExtension(pi: ExtensionAPI): void {
     await taskManager.restoreSession(sessionId);
   });
 
-  // agent_settled: if background tasks are still running, inject a reminder.
-  pi.on("agent_settled", createGuardHandler(pi));
+  // agent_settled + turn_end: handled by the `guard` extension, which
+  // coordinates priority between task guard and target guard. The task
+  // guard handler is imported by guard/index.ts.
 
   // session_shutdown: cancel all running tasks and persist final state.
   pi.on("session_shutdown", async (_event, ctx) => {
