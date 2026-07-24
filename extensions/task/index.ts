@@ -67,6 +67,13 @@ export { createGuardHandler } from "./guard.js";
 export { TaskManager } from "./task-manager.js";
 export { OutputAccumulator } from "./output-accumulator.js";
 export * as persistence from "./persistence.js";
+export {
+  resolveAgent,
+  wrapPrompt,
+  formatAgentCatalog,
+  BUILTIN_AGENTS,
+  type AgentDefinition,
+} from "./agents.js";
 export type {
   Task,
   TaskType,

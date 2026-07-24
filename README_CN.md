@@ -11,7 +11,7 @@
 | 工具 | 说明 |
 |------|------|
 | `CreateBash` | 后台执行 shell 命令，立即返回任务 ID。 |
-| `CreateAgent` | 后台启动 pi 子进程执行 agent 任务，立即返回任务 ID。内置角色：`explorer`、`code-reviewer`、`general`。自定义：`.pi/agents/*.md`。 |
+| `CreateAgent` | 后台启动 pi 子进程执行 agent 任务，立即返回任务 ID。内置角色：`explorer`、`code-reviewer`、`general`（自定义行为用 `general`）。 |
 | `AwaitTask` | 阻塞等待指定任务完成。默认超时 3600 秒；超时不会取消任务。 |
 | `CancelTask` | 终止运行中的任务进程树（SIGTERM → 5秒 → SIGKILL）。 |
 | `ResumeTask` | 续跑已完成的 agent 任务（启动新子进程）。bash 任务不可续跑。 |
@@ -20,8 +20,8 @@
 
 **核心特性：**
 - **会话级隔离** — 任务按会话隔离，持久化到 `~/.pi/atlas/sessions/<sessionId>/task/`。
-- **Agent 预设角色** — 内置角色（`explorer`、`code-reviewer`、`general`）+ 自定义 `.pi/agents/*.md`。角色列表在 `session_start` 时注入到 CreateAgent 工具描述。
-- **提示词包裹** — agent 的 `prefix`/`suffix`（YAML frontmatter）包裹 task prompt：`prefix + "\n\n" + prompt + "\n\n" + suffix`。
+- **Agent 预设角色** — 三个内置角色（`explorer`、`code-reviewer`、`general`）。角色列表注入到 CreateAgent 工具描述。
+- **提示词包裹** — agent 的 `prefix`/`suffix` 包裹 task prompt：`prefix + "\n\n" + prompt + "\n\n" + suffix`。
 - **输出截断** — 尾部保留 50KB / 2000 行；超限时完整输出保存到文件。
 - **agent_settled 守卫** — 有活跃任务时阻止 agent 结束当前回合。
 - **嵌套深度控制** — 通过 `PI_ATLAS_TASK_DEPTH` 环境变量限制嵌套 agent 任务（默认最大 3 层）。
@@ -104,34 +104,15 @@ ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-time
 
 ### Agent 预设角色
 
-内置角色（始终可用）：
+三个内置角色始终可用：
 
 | 角色 | 描述 | 工具 |
 |------|------|------|
 | `explorer` | 快速代码侦察，返回压缩上下文 | read, grep, find, ls, bash |
 | `code-reviewer` | 只读代码审查（需求合规 + 质量标准） | read, grep, bash |
-| `general` | 通用，无特殊提示词 | （所有工具） |
+| `general` | 通用，无特殊提示词 — 用于自定义行为 | （所有工具） |
 
-自定义角色为 `.md` 文件，放在 `.pi/agents/`（项目）或 `~/.pi/agents/`（用户）：
-
-```yaml
----
-description: 总结 agent
-model: claude-haiku-4-5
-tools: read, grep
-prefix: |
-  你是一个总结者，保持简洁。
-suffix: |
-  以列表形式输出。
----
-```
-
-- `description`（必填）— 显示在 CreateAgent 工具列表中。
-- `prefix` / `suffix`（至少一个必填）— 包裹 task prompt。
-- `model`（可选）— 模型覆盖。
-- `tools`（可选）— 逗号分隔的工具白名单。
-
-解析优先级：项目 `.pi/agents/`（最近，向上）→ 用户 `~/.pi/agents/` → 内置。
+自定义 agent 行为时使用 `general`，直接编写 task prompt — 它没有 `prefix`/`suffix`，你传入的 prompt 即完整指令。也可配合 `model` / `tools` / `cwd` 进一步定制。
 
 指定不存在的 agent 会报错并列出所有可用角色。
 

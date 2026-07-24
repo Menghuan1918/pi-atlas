@@ -196,7 +196,6 @@ export class TaskManager {
       agent?: string;
       model?: string;
       tools?: string[];
-      appendSystemPrompt?: string;
       sessionDir: string;
       depth?: number;
       parentId?: string;
@@ -235,7 +234,6 @@ export class TaskManager {
       prompt: prompt,
       model: options.model,
       tools: options.tools,
-      appendSystemPrompt: options.appendSystemPrompt,
       sessionDir: options.sessionDir,
     });
 
@@ -263,16 +261,12 @@ export class TaskManager {
       prompt: string;
       model?: string;
       tools?: string[];
-      appendSystemPrompt?: string;
       sessionDir: string;
     },
   ): void {
     // Build pi CLI arguments.
     const args: string[] = ["--mode", "json", "-p"];
     args.push("--session-dir", options.sessionDir);
-    if (options.appendSystemPrompt) {
-      args.push("--append-system-prompt", options.appendSystemPrompt);
-    }
     if (options.model) {
       args.push("--model", options.model);
     }

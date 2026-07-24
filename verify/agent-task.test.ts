@@ -5,7 +5,7 @@
  * Run: npx tsx verify/agent-task.test.ts
  */
 
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,9 +13,9 @@ import { TaskManager, taskManager } from "../extensions/task/index.js";
 import {
   extractFinalOutput,
   getPiInvocation,
-  resolveAgent,
   MAX_AGENT_DEPTH,
 } from "../extensions/task/agent-task.js";
+import { resolveAgent, wrapPrompt, formatAgentCatalog, BUILTIN_AGENTS } from "../extensions/task/agents.js";
 import * as persistence from "../extensions/task/persistence.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -557,40 +557,143 @@ console.log("\nTest 11: real pi end-to-end (simple prompt)");
 }
 
 // ---------------------------------------------------------------------------
-// 12. resolveAgent
+// 12. resolveAgent (built-in only)
 // ---------------------------------------------------------------------------
 
-console.log("\nTest 12: resolveAgent finds agent definitions");
+console.log("\nTest 12: resolveAgent finds built-in agents");
 {
-  const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-resolve-"));
-  const agentsDir = join(tempDir, "agents");
-  mkdirSync(agentsDir, { recursive: true });
-  writeFileSync(
-    join(agentsDir, "reviewer.md"),
-    "---\nname: reviewer\ndescription: Code reviewer\nmodel: test-model\ntools: read,grep\n---\nYou are a code reviewer.\n",
-  );
+  const resolved = resolveAgent("explorer");
+  assert(resolved !== null, "explorer resolved");
+  assert(resolved!.prefix?.includes("You are a scout"), "explorer prefix extracted");
+  assert(resolved!.tools?.includes("read"), "explorer tools include read");
 
-  process.env.PI_CODING_AGENT_DIR = tempDir;
-  process.env.PI_ATLAS_DIR = tempDir;
+  const reviewer = resolveAgent("code-reviewer");
+  assert(reviewer !== null, "code-reviewer resolved");
+  assert(reviewer!.prefix?.includes("Senior Code Reviewer"), "code-reviewer prefix extracted");
 
-  const resolved = resolveAgent(process.cwd(), "reviewer");
-  assert(resolved !== null, "agent resolved");
-  assert(resolved!.systemPrompt.includes("You are a code reviewer"), "systemPrompt extracted");
-  assert(resolved!.model === "test-model", "model extracted from frontmatter");
-  assert(Array.isArray(resolved!.tools), "tools extracted");
-  assert(resolved!.tools?.includes("read"), "tools include 'read'");
+  const general = resolveAgent("general");
+  assert(general !== null, "general resolved");
+  assert(general!.prefix === undefined, "general has no prefix");
 
-  const notFound = resolveAgent(process.cwd(), "nonexistent-agent");
+  const notFound = resolveAgent("nonexistent-agent");
   assert(notFound === null, "unknown agent returns null");
-
-  rmSync(tempDir, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------------------
-// 12b. Integration: usage tracking (cost as object)
+// 12a. Built-in agents
 // ---------------------------------------------------------------------------
 
-console.log("\nTest 12b: usage.cost accumulation (object form)");
+console.log("\nTest 12a: built-in agents (explorer, code-reviewer, general)");
+{
+  assert(BUILTIN_AGENTS["explorer"] !== undefined, "explorer built-in exists");
+  assert(BUILTIN_AGENTS["code-reviewer"] !== undefined, "code-reviewer built-in exists");
+  assert(BUILTIN_AGENTS["general"] !== undefined, "general built-in exists");
+
+  assert(BUILTIN_AGENTS["explorer"].prefix !== undefined, "explorer has prefix");
+  assert(BUILTIN_AGENTS["explorer"].suffix === undefined, "explorer has no suffix");
+  assert(BUILTIN_AGENTS["explorer"].tools?.includes("read"), "explorer tools include read");
+  assert(BUILTIN_AGENTS["explorer"].tools?.includes("grep"), "explorer tools include grep");
+
+  assert(BUILTIN_AGENTS["code-reviewer"].prefix !== undefined, "code-reviewer has prefix");
+  assert(BUILTIN_AGENTS["code-reviewer"].tools?.includes("read"), "code-reviewer tools include read");
+  assert(BUILTIN_AGENTS["code-reviewer"].tools?.includes("bash"), "code-reviewer tools include bash");
+
+  // general: no prefix, no suffix, no tools
+  assert(BUILTIN_AGENTS["general"].prefix === undefined, "general has no prefix");
+  assert(BUILTIN_AGENTS["general"].suffix === undefined, "general has no suffix");
+  assert(BUILTIN_AGENTS["general"].tools === undefined, "general has no tools");
+}
+
+// ---------------------------------------------------------------------------
+// 12b. wrapPrompt
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 12b: wrapPrompt wraps prompt with prefix and suffix");
+{
+  // prefix only (explorer)
+  const explorer = BUILTIN_AGENTS["explorer"];
+  const wrapped = wrapPrompt("Find the auth module", explorer);
+  assert(wrapped.startsWith("You are a scout"), "prefix at start");
+  assert(wrapped.includes("Find the auth module"), "prompt in middle");
+  assert(wrapped.endsWith("Find the auth module"), "prompt at end (no suffix)");
+
+  // prefix + suffix
+  const both: { prefix: string; suffix: string } = {
+    prefix: "BEFORE",
+    suffix: "AFTER",
+  };
+  const wrapped2 = wrapPrompt("TASK", both);
+  assert(wrapped2 === "BEFORE\n\nTASK\n\nAFTER", "prefix + prompt + suffix with newlines");
+
+  // general (no prefix, no suffix) — prompt returned as-is
+  const general = BUILTIN_AGENTS["general"];
+  const wrapped3 = wrapPrompt("Do something", general);
+  assert(wrapped3 === "Do something", "general returns prompt unchanged");
+}
+
+// ---------------------------------------------------------------------------
+// 12c. formatAgentCatalog
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 12c: formatAgentCatalog lists all built-in agents");
+{
+  const catalog = formatAgentCatalog(Object.values(BUILTIN_AGENTS));
+  assert(catalog.includes("explorer:"), "catalog includes explorer");
+  assert(catalog.includes("code-reviewer:"), "catalog includes code-reviewer");
+  assert(catalog.includes("general:"), "catalog includes general");
+  assert(catalog.includes("- "), "catalog uses dash format");
+}
+
+// ---------------------------------------------------------------------------
+// 12d. CreateAgent tool description contains agent catalog
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 12d: CreateAgent description has agent catalog");
+{
+  const { createAgentTool } = await import("../extensions/task/agent-task.js");
+  assert(createAgentTool.description.includes("Available agents:"), "description has Available agents header");
+  assert(createAgentTool.description.includes("explorer:"), "description lists explorer");
+  assert(createAgentTool.description.includes("code-reviewer:"), "description lists code-reviewer");
+  assert(createAgentTool.description.includes("general:"), "description lists general");
+}
+
+// ---------------------------------------------------------------------------
+// 12e. CreateAgent not-found error lists available agents
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 12e: CreateAgent not-found error lists available agents");
+{
+  const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-notfound-"));
+  process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
+  const sessionId = "notfound-session";
+  const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-notfound-sess-"));
+  taskManager.setSessionDepth(sessionId, 0);
+
+  const { createAgentTool } = await import("../extensions/task/agent-task.js");
+  const ctx = makeCtx(sessionId, sessionDir);
+
+  const result = await createAgentTool.execute(
+    "tc1",
+    { prompt: "do something", agent: "nonexistent-agent" },
+    undefined, undefined, ctx,
+  ) as unknown as ToolResult;
+
+  assert(result.isError === true, "returns isError");
+  assert(result.content[0].text.includes("not found"), "error says not found");
+  assert(result.content[0].text.includes("explorer"), "error lists explorer");
+  assert(result.content[0].text.includes("code-reviewer"), "error lists code-reviewer");
+  assert(result.content[0].text.includes("general"), "error lists general");
+  assert(result.details.taskId === "", "no task created");
+
+  rmSync(sessionDir, { recursive: true, force: true });
+  rmSync(tempDir, { recursive: true, force: true });
+}
+// ---------------------------------------------------------------------------
+// 12f. Integration: usage tracking (cost as object)
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 12f: usage.cost accumulation (object form)");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-usage-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;

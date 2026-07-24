@@ -11,7 +11,7 @@ Background task system with unified bash and agent execution. Seven tools:
 | Tool | Description |
 |------|-------------|
 | `CreateBash` | Run a shell command in the background. Returns immediately with a task ID. |
-| `CreateAgent` | Spawn a pi sub-process as a background agent task. Returns immediately with a task ID. Built-in agents: `explorer`, `code-reviewer`, `general`. Custom: `.pi/agents/*.md`. |
+| `CreateAgent` | Spawn a pi sub-process as a background agent task. Returns immediately with a task ID. Built-in agents: `explorer`, `code-reviewer`, `general` (use `general` for custom behavior). |
 | `AwaitTask` | Block until specified tasks finish. Default timeout 3600s; timeout does NOT cancel tasks. |
 | `CancelTask` | Kill a running task's process tree (SIGTERM → 5s → SIGKILL). |
 | `ResumeTask` | Continue a finished agent task in a new sub-process. Bash tasks cannot be resumed. |
@@ -19,8 +19,8 @@ Background task system with unified bash and agent execution. Seven tools:
 | `WatchTask` | View the current output and status of a task. |
 
 **Key features:**
-- **Agent presets** — built-in agents (`explorer`, `code-reviewer`, `general`) + custom `.pi/agents/*.md` files. Agent list injected into the CreateAgent tool description at `session_start`.
-- **Prompt wrapping** — agent `prefix`/`suffix` (YAML frontmatter) wrap the task prompt: `prefix + "\n\n" + prompt + "\n\n" + suffix`.
+- **Agent presets** — three built-in agents (`explorer`, `code-reviewer`, `general`). The agent list is injected into the CreateAgent tool description.
+- **Prompt wrapping** — agent `prefix`/`suffix` wrap the task prompt: `prefix + "\n\n" + prompt + "\n\n" + suffix`.
 - **Session-level isolation** — tasks are scoped per session, persisted to `~/.pi/atlas/sessions/<sessionId>/task/`.
 - **Output truncation** — tail-kept at 50KB / 2000 lines; full output saved to a file when truncated.
 - **agent_settled guard** — prevents the agent from ending a turn while tasks are still running.
@@ -104,36 +104,17 @@ Set `PI_ATLAS_TASK_DEPTH` in the environment. The top-level session defaults to 
 
 ### Agent presets
 
-Built-in agents (always available):
+Three built-in agents are always available:
 
 | Agent | Description | Tools |
 |------|-------------|-------|
 | `explorer` | Fast codebase recon returning compressed context | read, grep, find, ls, bash |
 | `code-reviewer` | Read-only code review against requirements and quality | read, grep, bash |
-| `general` | General-purpose, no special prompt | (all tools) |
+| `general` | General-purpose, no special prompt — use for custom behavior | (all tools) |
 
-Custom agents are `.md` files in `.pi/agents/` (project) or `~/.pi/agents/` (user):
+For custom agent behavior, use `general` and craft the task prompt directly — its `prefix`/`suffix` are empty, so the prompt you pass becomes the full instruction. You can also pass `model` / `tools` / `cwd` to tailor it.
 
-```yaml
----
-description: Summarizer agent
-model: claude-haiku-4-5
-tools: read, grep
-prefix: |
-  You are a summarizer. Be concise.
-suffix: |
-  Output as a bullet list.
----
-```
-
-- `description` (required) — shown in the CreateAgent tool listing.
-- `prefix` / `suffix` (at least one required) — wrap the task prompt.
-- `model` (optional) — model override.
-- `tools` (optional) — comma-separated tool allowlist.
-
-Resolution order: project `.pi/agents/` (nearest, upward) → user `~/.pi/agents/` → built-in.
-
-Specifying a non-existent agent returns an error with the full available agents list.
+Specifying a non-existent agent returns an error with the available agents list.
 
 ## Development
 

@@ -19,12 +19,10 @@ import { Type, type Static } from "@earendil-works/pi-ai";
 import {
   type ToolDefinition,
   type ExtensionContext,
-  getAgentDir,
-  parseFrontmatter,
-  CONFIG_DIR_NAME,
 } from "@earendil-works/pi-coding-agent";
 
 import { taskManager } from "./task-manager.js";
+import { resolveAgent, wrapPrompt, formatAgentCatalog, BUILTIN_AGENTS } from "./agents.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -114,79 +112,6 @@ export function formatAgentOutput(messages: PiMessage[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Agent resolution
-// ---------------------------------------------------------------------------
-
-/** Resolved agent definition (system prompt + optional config overrides). */
-export interface ResolvedAgent {
-  systemPrompt: string;
-  tools?: string[];
-  model?: string;
-}
-
-/**
- * Find and resolve an agent definition by name.
- *
- * Searches the project-local `.pi/agents/` directory (nearest to `cwd`) first,
- * then the user-level `~/.pi/agents/` directory. Returns `null` when the agent
- * file is not found.
- */
-export function resolveAgent(cwd: string, agentName: string): ResolvedAgent | null {
-  const filePath = findAgentFile(cwd, agentName);
-  if (!filePath) return null;
-
-  let content: string;
-  try {
-    content = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return null;
-  }
-
-  const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
-
-  const tools = frontmatter.tools
-    ?.split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-
-  return {
-    systemPrompt: body,
-    tools: tools && tools.length > 0 ? tools : undefined,
-    model: frontmatter.model,
-  };
-}
-
-/** Search for `<name>.md` in project agents dir first, then user agents dir. */
-function findAgentFile(cwd: string, agentName: string): string | null {
-  const safeName = agentName.replace(/[^\w.-]+/g, "_");
-  const fileName = `${safeName}.md`;
-
-  // 1. Nearest project .pi/agents/ from cwd upward
-  let dir = cwd;
-  while (true) {
-    const candidate = path.join(dir, CONFIG_DIR_NAME, "agents", fileName);
-    if (fileExists(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-
-  // 2. User-level ~/.pi/agents/
-  const userFile = path.join(getAgentDir(), "agents", fileName);
-  if (fileExists(userFile)) return userFile;
-
-  return null;
-}
-
-function fileExists(p: string): boolean {
-  try {
-    return fs.statSync(p).isFile();
-  } catch {
-    return false;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // CreateAgent tool
 // ---------------------------------------------------------------------------
 
@@ -195,7 +120,7 @@ const createAgentParameters = Type.Object({
   agent: Type.Optional(
     Type.String({
       description:
-        "Agent name (from ~/.pi/agents). If omitted, runs as a generic agent.",
+        "Agent name (built-in: explorer, code-reviewer, general). Use general for custom agent behavior.",
     }),
   ),
   model: Type.Optional(
@@ -223,7 +148,9 @@ export const createAgentTool: ToolDefinition<typeof createAgentParameters, Creat
   description:
     "Launch a background agent task that runs a pi sub-process with the given prompt. " +
     "Returns immediately with a task ID. Use AwaitTask to wait for completion " +
-    "(agent tasks may take long — use the default timeout).",
+    "(agent tasks may take long — use the default timeout).\n\n" +
+    "Available agents:\n" +
+    formatAgentCatalog(Object.values(BUILTIN_AGENTS)),
   promptSnippet: "Run a background agent task (returns task ID immediately)",
   promptGuidelines: [
     "Use CreateAgent to delegate work to a sub-agent that runs independently while you continue.",
@@ -265,26 +192,36 @@ export const createAgentTool: ToolDefinition<typeof createAgentParameters, Creat
     }
 
     // Resolve agent definition (if specified)
-    let appendSystemPrompt: string | undefined;
     let model = params.model;
     let tools = params.tools;
+    let effectivePrompt = params.prompt;
 
     if (params.agent) {
-      const agentInfo = resolveAgent(cwd, params.agent);
-      if (agentInfo) {
-        appendSystemPrompt = agentInfo.systemPrompt;
-        model = model ?? agentInfo.model;
-        tools = tools ?? agentInfo.tools;
+      const agentInfo = resolveAgent(params.agent);
+      if (!agentInfo) {
+        // Agent not found — error and list available agents.
+        const catalog = formatAgentCatalog(Object.values(BUILTIN_AGENTS));
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Agent "${params.agent}" not found.\n\nAvailable agents:\n${catalog}`,
+            },
+          ],
+          details: { taskId: "", status: "failed", agent: params.agent },
+        };
       }
-      // If agent file not found, proceed as a generic agent (name is tracked for display).
+      model = model ?? agentInfo.model;
+      tools = tools ?? agentInfo.tools;
+      effectivePrompt = wrapPrompt(params.prompt, agentInfo);
     }
 
-    const task = taskManager.createAgentTask(sessionId, params.prompt, {
+    const task = taskManager.createAgentTask(sessionId, effectivePrompt, {
       cwd,
       agent: params.agent,
       model,
       tools,
-      appendSystemPrompt,
       sessionDir: ctx.sessionManager.getSessionDir(),
       depth: currentDepth,
     });
@@ -404,26 +341,27 @@ export const resumeTaskTool: ToolDefinition<typeof resumeTaskParameters, ResumeT
     const previousOutput = parentTask.output || "(no output from previous task)";
     const fullPrompt = `${resumeInstruction}\n\n--- Previous task output ---\n${previousOutput}`;
 
-    // Re-resolve agent definition to carry over system prompt, model, and tools.
-    let appendSystemPrompt: string | undefined;
+    // Re-resolve agent definition to carry over prefix/suffix, model, and tools.
     let model: string | undefined;
     let tools: string[] | undefined;
+    let effectiveResumePrompt = fullPrompt;
 
     if (parentTask.agent) {
-      const agentInfo = resolveAgent(parentTask.cwd, parentTask.agent);
+      const agentInfo = resolveAgent(parentTask.agent);
       if (agentInfo) {
-        appendSystemPrompt = agentInfo.systemPrompt;
         model = agentInfo.model;
         tools = agentInfo.tools;
+        effectiveResumePrompt = wrapPrompt(fullPrompt, agentInfo);
       }
+      // If the agent definition is no longer found (e.g. file deleted),
+      // proceed as a generic agent — the task can still be resumed.
     }
 
-    const task = taskManager.createAgentTask(sessionId, fullPrompt, {
+    const task = taskManager.createAgentTask(sessionId, effectiveResumePrompt, {
       cwd: parentTask.cwd,
       agent: parentTask.agent,
       model,
       tools,
-      appendSystemPrompt,
       sessionDir: ctx.sessionManager.getSessionDir(),
       depth: currentDepth,
       parentId: params.taskId,
