@@ -79,6 +79,12 @@ export interface TaskResult {
   command?: string;
   prompt?: string;
   type: TaskType;
+  /** When the task started (for elapsed calculation). */
+  startedAt?: number;
+  /** When the task reached a terminal state (for elapsed calculation). */
+  finishedAt?: number;
+  /** agent: usage stats (turns, tokens, cost) — only for agent tasks. */
+  usage?: TaskUsage;
 }
 
 /**

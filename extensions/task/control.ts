@@ -10,7 +10,6 @@ import { Type, type Static } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import {
   truncateTail,
-  formatSize,
   type ToolDefinition,
   type ExtensionContext,
   type AgentToolUpdateCallback,
@@ -18,6 +17,7 @@ import {
 
 import { taskManager } from "./task-manager.js";
 import type { Task, TaskResult, TaskStatus } from "./types.js";
+import { formatDuration } from "../shared/format-utils.js";
 
 const DEFAULT_AWAIT_TIMEOUT_S = 3600;
 
@@ -49,15 +49,20 @@ interface AwaitTaskDetails {
 }
 
 function formatTaskResult(r: TaskResult): string {
-  const parts = [`Task ${r.id}: ${r.status}`];
+  const parts = [`Task ${r.id}: [${r.type}] ${r.status}`];
   if (r.exitCode !== undefined) parts.push(`exit=${r.exitCode}`);
-  if (r.command) parts.push(`cmd=${r.command}`);
+  if (r.startedAt && r.finishedAt) {
+    parts.push(`elapsed=${formatDuration(r.finishedAt - r.startedAt)}`);
+  }
+  if (r.type === "agent" && r.usage?.turns) {
+    parts.push(`turns=${r.usage.turns}`);
+  }
   const lines: string[] = [parts.join("  ")];
   if (r.output) {
-    lines.push(r.output);
+    lines.push("", r.output.trimEnd());
   }
   if (r.outputPath) {
-    lines.push(`Full output: ${r.outputPath}`);
+    lines.push("", `Full output: ${r.outputPath}`);
   }
   return lines.join("\n");
 }
@@ -84,6 +89,9 @@ function taskToResult(task: Task): TaskResult {
     command: task.command,
     prompt: task.prompt,
     type: task.type,
+    startedAt: task.startedAt,
+    finishedAt: task.finishedAt,
+    usage: task.usage,
   };
 }
 
@@ -276,6 +284,19 @@ export const cancelTaskTool: ToolDefinition<typeof cancelTaskParameters> = {
   ) {
     const sessionId = ctx.sessionManager.getSessionId();
     try {
+      // Check if the task is already terminal — cancel is a no-op in that case.
+      const existing = taskManager.getTask(sessionId, params.taskId);
+      if (existing && existing.status !== "running") {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Task ${params.taskId} is already ${existing.status} (exit code ${existing.exitCode ?? "N/A"}). No action taken.`,
+            },
+          ],
+          details: undefined,
+        };
+      }
       const task = await taskManager.cancel(sessionId, params.taskId);
       return {
         content: [
@@ -309,10 +330,11 @@ const listTaskParameters = Type.Object({});
 type ListTaskParams = Static<typeof listTaskParameters>;
 
 function formatTaskSummary(task: Task): string {
-  const age = ((Date.now() - task.startedAt) / 1000).toFixed(1);
+  const age = formatDuration(Date.now() - task.startedAt);
+  const exitStr = task.exitCode !== undefined ? String(task.exitCode) : "—";
   const cmd = task.command ?? task.prompt ?? "(no command)";
   const preview = cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd;
-  return `${task.id}  [${task.type}]  ${task.status}  ${age}s  ${preview}`;
+  return `${task.id}  [${task.type}]  ${task.status}  exit=${exitStr}  ${age}  ${preview}`;
 }
 
 export const listTaskTool: ToolDefinition<typeof listTaskParameters> = {
@@ -338,7 +360,7 @@ export const listTaskTool: ToolDefinition<typeof listTaskParameters> = {
     }
 
     const lines = tasks.map(formatTaskSummary);
-    const header = `${tasks.length} task(s):\n${"ID".padEnd(10)} TYPE    STATUS     AGE    COMMAND`;
+    const header = `${tasks.length} task(s):\nID  TYPE  STATUS  EXIT  AGE  COMMAND`;
     return {
       content: [{ type: "text" as const, text: `${header}\n${lines.join("\n")}` }],
       details: undefined,
@@ -382,15 +404,20 @@ export const watchTaskTool: ToolDefinition<typeof watchTaskParameters> = {
         output = trunc.content;
       }
 
-      const parts = [`Task ${params.taskId}: ${watch.status}`];
+      const parts = [`Task ${params.taskId}: [${watch.type}] ${watch.status}`];
       if (watch.exitCode !== undefined) {
         parts.push(`exit=${watch.exitCode}`);
       }
-      parts.push(`output=${formatSize(Buffer.byteLength(output, "utf-8"))}`);
+      if (watch.startedAt && watch.finishedAt) {
+        parts.push(`elapsed=${formatDuration(watch.finishedAt - watch.startedAt)}`);
+      }
+      if (watch.type === "agent" && watch.usage?.turns) {
+        parts.push(`turns=${watch.usage.turns}`);
+      }
 
       const lines = [parts.join("  ")];
       if (output) {
-        lines.push("", output);
+        lines.push("", output.trimEnd());
       } else {
         lines.push("", "(no output yet)");
       }

@@ -390,9 +390,7 @@ export const createAgentTool: ToolDefinition<typeof createAgentParameters, Creat
       content: [
         {
           type: "text",
-          text: `Agent task ${task.id} started (running in background).\n` +
-            (params.agent ? `Agent: ${params.agent}\n` : "") +
-            `Use AwaitTask to wait for completion (agent tasks may take long — use default timeout).`,
+          text: `Agent task ${task.id} started (running in background).`,
         },
       ],
       details: { taskId: task.id, status: task.status, agent: params.agent },
@@ -554,8 +552,7 @@ export const resumeTaskTool: ToolDefinition<typeof resumeTaskParameters, ResumeT
       content: [
         {
           type: "text",
-          text: `Agent task ${task.id} resumed from ${params.taskId} (running in background).\n` +
-            `Use AwaitTask to wait for completion (agent tasks may take long — use default timeout).`,
+          text: `Agent task ${task.id} resumed from ${params.taskId} (running in background).`,
         },
       ],
       details: { taskId: task.id, parentId: params.taskId, status: task.status },

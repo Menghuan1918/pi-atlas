@@ -8,7 +8,7 @@
  * Writes are atomic: data is written to a temp file then renamed.
  */
 
-import { mkdir, rename, readFile, writeFile, access, constants } from "node:fs/promises";
+import { mkdir, rename, readFile, writeFile, access, constants, symlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { getAtlasSessionDir } from "../shared/atlas-paths.js";
 import type { Task } from "./types.js";
@@ -108,13 +108,35 @@ async function saveTasksLocked(sessionId: string, tasks: Task[]): Promise<void> 
 
 /**
  * Write the full (untruncated) output for a task and return the file path.
+ *
+ * The real file is written to `task/output-<taskId>.log`. A shorter symlink
+ * `<sessionId>/<taskId>.log` is created at the session-dir level pointing to
+ * it (relative target), so tool results show the shorter path to save tokens.
+ * If symlink creation fails, the full path is returned as fallback.
  */
 export async function writeOutput(sessionId: string, taskId: string, output: string): Promise<string> {
   const dir = getTasksDir(sessionId);
   await ensureDir(dir);
   const filePath = join(dir, `output-${taskId}.log`);
   await atomicWrite(filePath, output);
-  return filePath;
+
+  // Create a shorter symlink at the session level: <sid>/<taskId>.log → task/output-<taskId>.log
+  const linkPath = join(getAtlasSessionDir(sessionId), `${taskId}.log`);
+  const relativeTarget = join("task", `output-${taskId}.log`);
+  try {
+    await symlink(relativeTarget, linkPath);
+    return linkPath;
+  } catch {
+    // Symlink may already exist (stale from a previous run). Replace it.
+    try {
+      await unlink(linkPath);
+      await symlink(relativeTarget, linkPath);
+      return linkPath;
+    } catch {
+      // If we still can't create the symlink, return the full path.
+      return filePath;
+    }
+  }
 }
 
 /**

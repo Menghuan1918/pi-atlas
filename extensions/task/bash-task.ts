@@ -81,7 +81,7 @@ export const createBashTool: ToolDefinition<typeof createBashParameters, CreateB
       content: [
         {
           type: "text",
-          text: `Started bash task ${task.id} (running in background).\nCommand: ${params.command}\nUse AwaitTask to wait for completion, WatchTask to view output, or CancelTask to stop.`,
+          text: `Started bash task ${task.id} (running in background).`,
         },
       ],
       details: {

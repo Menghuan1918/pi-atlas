@@ -349,8 +349,9 @@ class TargetManager {
     }
 
     if (state.secondary.length > 0) {
+      const done = state.secondary.filter((t) => t.status === "completed").length;
       lines.push("");
-      lines.push("Secondary targets:");
+      lines.push(`Secondary targets (${done}/${state.secondary.length} completed):`);
       for (const item of state.secondary) {
         const mark =
           item.status === "completed"
@@ -358,7 +359,7 @@ class TargetManager {
             : item.status === "failed"
               ? "✗"
               : "○";
-        lines.push(`  ${mark} [#${item.id}] ${item.text} (${item.status})`);
+        lines.push(`  ${mark} [#${item.id}] ${item.text}`);
         if (item.note) lines.push(`      note: ${item.note}`);
       }
     } else if (state.primary) {

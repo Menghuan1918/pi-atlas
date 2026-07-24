@@ -20,7 +20,7 @@ import {
   DEFAULT_MAX_BYTES,
 } from "@earendil-works/pi-coding-agent";
 
-import type { Task, TaskResult, TaskStatus, TaskUsage } from "./types.js";
+import type { Task, TaskResult, TaskStatus, TaskType, TaskUsage } from "./types.js";
 import { generateTaskId } from "./types.js";
 import { OutputAccumulator } from "./output-accumulator.js";
 import * as persistence from "./persistence.js";
@@ -790,6 +790,10 @@ export class TaskManager {
     outputPath?: string;
     status: TaskStatus;
     exitCode?: number;
+    type: TaskType;
+    startedAt?: number;
+    finishedAt?: number;
+    usage?: TaskUsage;
   } {
     const task = this.getTask(sessionId, taskId);
     if (!task) {
@@ -803,7 +807,7 @@ export class TaskManager {
         if (messages && messages.length > 0) {
           const latest = extractFinalOutput(messages);
           if (latest) {
-            return { output: latest, status: task.status };
+            return { output: latest, status: task.status, type: task.type, startedAt: task.startedAt };
           }
         }
       }
@@ -815,6 +819,8 @@ export class TaskManager {
           output: snapshot.content,
           outputPath: snapshot.fullOutputPath,
           status: task.status,
+          type: task.type,
+          startedAt: task.startedAt,
         };
       }
     }
@@ -824,6 +830,10 @@ export class TaskManager {
       outputPath: task.outputPath,
       status: task.status,
       exitCode: task.exitCode,
+      type: task.type,
+      startedAt: task.startedAt,
+      finishedAt: task.finishedAt,
+      usage: task.usage,
     };
   }
 
@@ -886,6 +896,9 @@ export class TaskManager {
       command: task.command,
       prompt: task.prompt,
       type: task.type,
+      startedAt: task.startedAt,
+      finishedAt: task.finishedAt,
+      usage: task.usage,
     };
   }
 }
