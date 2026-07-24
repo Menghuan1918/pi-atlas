@@ -22,3 +22,6 @@ Thumbs.db
 
 # workspace-docs (independent shared git repo, not part of this project)
 .workspace-docs/
+
+# Internal dev docs (plans, notes, etc.)
+docs/

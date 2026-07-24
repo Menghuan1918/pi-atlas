@@ -199,6 +199,8 @@ export class TaskManager {
       sessionDir: string;
       depth?: number;
       parentId?: string;
+      /** Sub-session ID to resume (restores full conversation history via --session). */
+      resumeSid?: string;
     },
   ): Task {
     const id = generateTaskId();
@@ -235,6 +237,7 @@ export class TaskManager {
       model: options.model,
       tools: options.tools,
       sessionDir: options.sessionDir,
+      resumeSid: options.resumeSid,
     });
 
     // Persist the initial running state.
@@ -250,8 +253,11 @@ export class TaskManager {
    *
    * The child runs with `--mode json -p` (single-turn JSON output). Session
    * persistence is enabled (no `--no-session`) so the sub-session is saved
-   * to the parent's session directory. The JSON event stream is parsed
-   * line-by-line to accumulate messages and extract the session file path.
+   * to the isolated atlas sub-sessions directory. The JSON event stream is
+   * parsed line-by-line to accumulate messages and extract the session file path.
+   *
+   * `ask_user` is always excluded — sub-agents cannot prompt the user directly.
+   * If `resumeSid` is provided, `--session <sid>` restores the prior conversation.
    */
   private spawnAgent(
     sessionId: string,
@@ -262,11 +268,18 @@ export class TaskManager {
       model?: string;
       tools?: string[];
       sessionDir: string;
+      resumeSid?: string;
     },
   ): void {
     // Build pi CLI arguments.
     const args: string[] = ["--mode", "json", "-p"];
     args.push("--session-dir", options.sessionDir);
+    // Always exclude ask_user — sub-agents cannot interact with the user
+    // directly. They communicate questions via text output to the parent agent.
+    args.push("--exclude-tools", "ask_user");
+    if (options.resumeSid) {
+      args.push("--session", options.resumeSid);
+    }
     if (options.model) {
       args.push("--model", options.model);
     }

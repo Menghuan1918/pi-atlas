@@ -12,8 +12,11 @@ import { join } from "node:path";
 import { TaskManager, taskManager } from "../extensions/task/index.js";
 import {
   extractFinalOutput,
+  extractSessionIdFromPath,
   getPiInvocation,
   MAX_AGENT_DEPTH,
+  resolveModelFromTier,
+  parseModelPatternFromListOutput,
 } from "../extensions/task/agent-task.js";
 import { resolveAgent, wrapPrompt, formatAgentCatalog, BUILTIN_AGENTS } from "../extensions/task/agents.js";
 import * as persistence from "../extensions/task/persistence.js";
@@ -54,19 +57,23 @@ function makeCtx(sessionId: string, sessionDir: string, cwd = process.cwd()): Ex
   } as unknown as ExtensionContext;
 }
 
-/** Write a mock pi script that emits a JSON event stream and exits with `exitCode`. */
+/** Write a mock pi that emits a JSON event stream and exits with `exitCode`. */
 function writeMockPi(dir: string, assistantText: string, exitCode = 0, extraEvents = ""): string {
   const script = `#!/usr/bin/env node
-// Mock pi: parse --session-dir and emit JSON events.
+// Mock pi: parse --session-dir, --session, --exclude-tools and emit JSON events.
 const args = process.argv.slice(2);
 let sessionDir = ".";
+let resumeSession = "";
+let excludeTools = "";
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--session-dir") sessionDir = args[i + 1];
+  if (args[i] === "--session") resumeSession = args[i + 1];
+  if (args[i] === "--exclude-tools") excludeTools = args[i + 1];
 }
 // Prompt is the last positional arg.
 const prompt = args[args.length - 1];
 
-const sid = "mock-" + Math.random().toString(36).slice(2, 10);
+const sid = resumeSession || require("crypto").randomUUID();
 const ts = new Date().toISOString();
 const fileTs = ts.replace(/[:.]/g, "-");
 
@@ -75,10 +82,11 @@ console.log(JSON.stringify({ type: "session", version: 3, id: sid, timestamp: ts
 console.log(JSON.stringify({ type: "agent_start" }));
 console.log(JSON.stringify({ type: "turn_start" }));
 
-// Assistant message
+// Assistant message — append captured args for test verification
+const suffix = (resumeSession ? " [resumed=" + resumeSession + "]" : "") + (excludeTools ? " [excluded=" + excludeTools + "]" : "");
 const msg = {
   role: "assistant",
-  content: [{ type: "text", text: ${JSON.stringify(assistantText)} }],
+  content: [{ type: "text", text: ${JSON.stringify(assistantText)} + suffix }],
   model: "mock-model",
   usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0 } },
   stopReason: "stop",
@@ -407,7 +415,7 @@ console.log("\nTest 8: ResumeTask rejects non-existent and running tasks");
 // 9. Integration: ResumeTask on completed agent task
 // ---------------------------------------------------------------------------
 
-console.log("\nTest 9: ResumeTask creates child task from completed agent");
+console.log("\nTest 9: ResumeTask restores session via --session (not output injection)");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-resume-ok-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
@@ -432,6 +440,10 @@ console.log("\nTest 9: ResumeTask creates child task from completed agent");
     await tm.awaitTasks(sessionId, [parentTask.id], 15000);
     assert(tm.getTask(sessionId, parentTask.id)!.status === "completed", "parent completed");
 
+    // The parent task must have a sessionFile (extracted from session header)
+    const parentFinal = tm.getTask(sessionId, parentTask.id)!;
+    assert(parentFinal.sessionFile !== undefined, "parent sessionFile is set");
+
     // Resume via the tool
     const { resumeTaskTool } = await import("../extensions/task/agent-task.js");
     const ctx = makeCtx(sessionId, sessionDir);
@@ -450,11 +462,17 @@ console.log("\nTest 9: ResumeTask creates child task from completed agent");
 
     const childTask = tm.getTask(sessionId, resumeResult.details.taskId);
     assert(childTask?.parentId === parentTask.id, "child task parentId correct");
+    // New behavior: prompt is just the instruction, NOT the previous output
     assert(childTask?.prompt?.includes("Now do step 2"), "child prompt includes new instruction");
-    assert(childTask?.prompt?.includes("First result"), "child prompt includes parent output");
+    assert(!childTask?.prompt?.includes("First result"), "child prompt does NOT inject previous output");
+    assert(!childTask?.prompt?.includes("Previous task output"), "no 'Previous task output' section");
 
     await tm.awaitTasks(sessionId, [childTask!.id], 15000);
     assert(tm.getTask(sessionId, childTask!.id)!.status === "completed", "child completed");
+
+    // The mock pi echoes --session in its output when resumed
+    const childOutput = tm.getTask(sessionId, childTask!.id)!.output;
+    assert(childOutput.includes("[resumed="), "child output shows --session was passed");
   } finally {
     process.argv[1] = savedArgv1;
     rmSync(sessionDir, { recursive: true, force: true });
@@ -743,6 +761,126 @@ console.log("\nTest 12f: usage.cost accumulation (object form)");
     rmSync(sessionDir, { recursive: true, force: true });
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// 13. model_tier resolution + auto-detection
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 13: resolveModelFromTier reads / creates model-tiers.json");
+{
+  const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-tier-"));
+  process.env.PI_ATLAS_DIR = tempDir;
+  process.env.PI_CODING_AGENT_DIR = tempDir;
+
+  const { getModelTiersPath } = await import("../extensions/shared/atlas-paths.js");
+  const configPath = getModelTiersPath();
+
+  // First call: config doesn't exist → auto-detect (may fall back to default)
+  const fast = resolveModelFromTier("fast");
+  const quality = resolveModelFromTier("quality");
+  assert(typeof fast === "string" && fast.length > 0, "fast tier resolves to a string");
+  assert(typeof quality === "string" && quality.length > 0, "quality tier resolves to a string");
+  // A real model pattern never contains whitespace — the pre-fix bug stored the
+  // `pi --list-models` table *header* here ("provider  model  context  ...").
+  assert(fast !== undefined && !/\s/.test(fast), "fast tier is a valid model pattern (no spaces)");
+  assert(quality !== undefined && !/\s/.test(quality), "quality tier is a valid model pattern (no spaces)");
+  assert(existsSync(configPath), "model-tiers.json created on first call");
+
+  // Self-heal: a stale config holding an invalid (header) value is re-detected
+  // rather than trusted.
+  const HEADER = "provider     model                    context  max-out  thinking  images";
+  writeFileSync(configPath, JSON.stringify({ fast: HEADER, quality: HEADER }) + "\n");
+  const healed = resolveModelFromTier("quality");
+  assert(healed !== undefined && !/\s/.test(healed), "stale header config self-heals to a valid pattern");
+
+  // Edit the config and verify it's read back
+  writeFileSync(configPath, JSON.stringify({ fast: "custom-fast-model", quality: "custom-quality-model" }) + "\n");
+  assert(resolveModelFromTier("fast") === "custom-fast-model", "reads updated fast model");
+  assert(resolveModelFromTier("quality") === "custom-quality-model", "reads updated quality model");
+
+  rmSync(tempDir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// 13a. parseModelPatternFromListOutput skips the table header
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 13a: parseModelPatternFromListOutput skips header, returns model");
+{
+  // Real `pi --list-models` output shape.
+  const output = [
+    "provider     model                    context  max-out  thinking  images",
+    "macaron      macaron-v1-coding-venti  600K     131.1K   yes       no    ",
+    "macaron-sol  gpt-5.6-sol              300K     131.1K   yes       yes   ",
+  ].join("\n");
+  assert(
+    parseModelPatternFromListOutput(output) === "macaron-v1-coding-venti",
+    "returns first data-row model (not the header)",
+  );
+
+  // Header-only output (no models configured) → null.
+  assert(
+    parseModelPatternFromListOutput("provider  model  context  max-out  thinking  images\n") === null,
+    "header-only output → null",
+  );
+
+  // The bare header line must never leak through as a model name.
+  assert(
+    parseModelPatternFromListOutput("provider     model                    context  max-out  thinking  images") === null,
+    "bare header line → null (never returned as a model)",
+  );
+
+  // Empty / error input → null.
+  assert(parseModelPatternFromListOutput("") === null, "empty output → null");
+  assert(parseModelPatternFromListOutput("Error: no models found") === null, "error line → null");
+}
+
+// ---------------------------------------------------------------------------
+// 14. ask_user always excluded from sub-agent args
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 14: spawnAgent always passes --exclude-tools ask_user");
+{
+  const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-exclude-"));
+  process.env.PI_CODING_AGENT_DIR = tempDir;
+  process.env.PI_ATLAS_DIR = tempDir;
+  const sessionId = "exclude-session";
+  const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-exclude-sess-"));
+  taskManager.setSessionDepth(sessionId, 0);
+
+  const mockScript = writeMockPi(tempDir, "ok");
+  const savedArgv1 = process.argv[1];
+  process.argv[1] = mockScript;
+
+  try {
+    const task = taskManager.createAgentTask(sessionId, "test", {
+      cwd: process.cwd(),
+      sessionDir,
+      depth: 0,
+    });
+    const { results } = await taskManager.awaitTasks(sessionId, [task.id], 15000);
+    assert(results[0].status === "completed", "task completed");
+    // The mock echoes [excluded=<tools>] when --exclude-tools is present
+    assert(results[0].output.includes("[excluded=ask_user]"), "--exclude-tools ask_user was passed");
+  } finally {
+    process.argv[1] = savedArgv1;
+    rmSync(sessionDir, { recursive: true, force: true });
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 15. extractSessionIdFromPath
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 15: extractSessionIdFromPath extracts UUID from session file path");
+{
+  const uuid = "019f9231-f847-791d-a9bb-e7240865d95f";
+  const p = `/some/dir/2026-07-24T03-36-16-199Z_${uuid}.jsonl`;
+  assert(extractSessionIdFromPath(p) === uuid, "extracts UUID from full path");
+  assert(extractSessionIdFromPath(`${uuid}.jsonl`) === uuid, "extracts UUID from basename");
+  assert(extractSessionIdFromPath("/some/dir/no-uuid-here.jsonl") === undefined, "returns undefined when no UUID");
 }
 
 // ---------------------------------------------------------------------------

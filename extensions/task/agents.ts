@@ -25,6 +25,8 @@ export interface AgentDefinition {
   suffix?: string;
   /** Model override (e.g. "claude-haiku-4-5"). */
   model?: string;
+  /** Model tier ("fast" | "quality") — preferred over `model` for built-in agents. */
+  modelTier?: "fast" | "quality";
   /** Tool allowlist. */
   tools?: string[];
 }
@@ -118,6 +120,7 @@ export const BUILTIN_AGENTS: Record<string, AgentDefinition> = {
     description:
       "Fast codebase recon that returns compressed context for handoff to other agents",
     prefix: EXPLORER_PREFIX,
+    modelTier: "fast",
     tools: ["read", "grep", "find", "ls", "bash"],
   },
   "code-reviewer": {

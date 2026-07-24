@@ -31,3 +31,27 @@ export function getAtlasDir(): string {
 export function getAtlasSessionDir(sessionId: string): string {
   return join(getAtlasDir(), "sessions", sessionId);
 }
+
+/**
+ * Get the directory for sub-agent session files (isolated from pi's session store).
+ *
+ * Sub-agent sessions are stored under the task extension's directory so they are
+ * never discovered by pi's `/resume` picker (which only scans `~/.pi/agent/sessions/`).
+ *
+ *   `~/.pi/atlas/sessions/<sessionId>/task/sub-sessions/`
+ */
+export function getAgentSessionDir(sessionId: string): string {
+  return join(getAtlasSessionDir(sessionId), "task", "sub-sessions");
+}
+
+/**
+ * Get the path to the global model-tiers config file.
+ *
+ *   `~/.pi/atlas/model-tiers.json`
+ *
+ * Maps `model_tier` values ("fast" | "quality") to pi model patterns.
+ * Created on first use via auto-detection (`pi --list-models`).
+ */
+export function getModelTiersPath(): string {
+  return join(getAtlasDir(), "model-tiers.json");
+}
