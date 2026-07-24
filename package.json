@@ -6,12 +6,13 @@
   "description": "TypeScript extensions for the pi coding agent",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/test-smoke.ts && tsx verify/config.test.ts && tsx verify/askuser.test.ts && tsx verify/agent-task.test.ts"
+    "test": "tsx scripts/test-smoke.ts && tsx verify/config.test.ts && tsx verify/askuser.test.ts && tsx verify/agent-task.test.ts && tsx verify/bash-timeout.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.81.1",
     "@earendil-works/pi-coding-agent": "0.81.1",
     "@earendil-works/pi-tui": "0.81.1",
+    "shell-quote": "^1.10.0",
     "typebox": "1.1.38"
   },
   "devDependencies": {

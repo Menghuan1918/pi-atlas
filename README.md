@@ -11,7 +11,7 @@ Background task system with unified bash and agent execution. Seven tools:
 | Tool | Description |
 |------|-------------|
 | `CreateBash` | Run a shell command in the background. Returns immediately with a task ID. |
-| `CreateAgent` | Spawn a pi sub-process as a background agent task. Returns immediately with a task ID. |
+| `CreateAgent` | Spawn a pi sub-process as a background agent task. Returns immediately with a task ID. Built-in agents: `explorer`, `code-reviewer`, `general`. Custom: `.pi/agents/*.md`. |
 | `AwaitTask` | Block until specified tasks finish. Default timeout 3600s; timeout does NOT cancel tasks. |
 | `CancelTask` | Kill a running task's process tree (SIGTERM → 5s → SIGKILL). |
 | `ResumeTask` | Continue a finished agent task in a new sub-process. Bash tasks cannot be resumed. |
@@ -19,7 +19,9 @@ Background task system with unified bash and agent execution. Seven tools:
 | `WatchTask` | View the current output and status of a task. |
 
 **Key features:**
-- **Session-level isolation** — tasks are scoped per session, persisted to `~/.pi/tasks/<sessionId>/`.
+- **Agent presets** — built-in agents (`explorer`, `code-reviewer`, `general`) + custom `.pi/agents/*.md` files. Agent list injected into the CreateAgent tool description at `session_start`.
+- **Prompt wrapping** — agent `prefix`/`suffix` (YAML frontmatter) wrap the task prompt: `prefix + "\n\n" + prompt + "\n\n" + suffix`.
+- **Session-level isolation** — tasks are scoped per session, persisted to `~/.pi/atlas/sessions/<sessionId>/task/`.
 - **Output truncation** — tail-kept at 50KB / 2000 lines; full output saved to a file when truncated.
 - **agent_settled guard** — prevents the agent from ending a turn while tasks are still running.
 - **Nesting depth control** — `PI_ATLAS_TASK_DEPTH` env var limits nested agent tasks (default max: 3).
@@ -34,11 +36,24 @@ Single tool that asks the user questions and blocks for answers:
 | `ask_user` | Ask one or more questions (select / confirm / input). Batch supported. |
 
 **Key features:**
-- **select** — single choice from options, with an "Other (free input)" fallback for custom answers.
+- **select** — single choice from options, with an "Other (free input)" fallback for custom answers. In TUI mode, selecting "Other" opens an inline editor directly (no separate dialog).
 - **confirm** — yes/no dialog.
-- **input** — free-text input.
-- **Session-level timeout** — configured via `~/.pi/agent/askuser-config.json` (`{"timeout": 0}` where 0 = infinite wait).
+- **input** — free-text input. In TUI mode, typing starts an inline editor immediately.
+- **TUI navigation** — in interactive mode, all questions are shown on one screen. Use ← → to switch between questions, ↑↓ to navigate options, Enter to confirm.
+- **Session-level timeout** — per-session config at `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` (`{"timeout": 0}` where 0 = infinite wait). Re-read on every call; other extensions can overwrite the file to change the timeout mid-session.
 - **Non-interactive fallback** — returns an error in print/json modes.
+
+### Bash Timeout Extension (`extensions/bash-timeout/`)
+
+Injects default timeouts for the built-in `bash` tool via two event handlers:
+
+- **`tool_call`** — when no timeout is specified, injects a default:
+  - **20 s** for search commands (`find`, `grep`, `rg`, `ag`, `ack`, `fd`, `locate`) — detected via regex pre-filter + `shell-quote` parsing.
+  - **120 s** for everything else.
+  - Explicit timeouts from the caller are always respected.
+- **`tool_result`** — when bash exits due to timeout, replaces the error message with a hint to use `CreateBash` for long-running commands.
+
+No tools or configuration — purely passive interception. Zero overhead when an explicit timeout is provided.
 
 ## Installation
 
@@ -47,6 +62,7 @@ Single tool that asks the user questions and blocks for answers:
 ```bash
 ln -s /path/to/pi-atlas/extensions/task ~/.pi/agent/extensions/task
 ln -s /path/to/pi-atlas/extensions/askuser ~/.pi/agent/extensions/askuser
+ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-timeout
 ```
 
 ### Via settings.json
@@ -55,7 +71,8 @@ ln -s /path/to/pi-atlas/extensions/askuser ~/.pi/agent/extensions/askuser
 {
   "extensions": [
     "/path/to/pi-atlas/extensions/task",
-    "/path/to/pi-atlas/extensions/askuser"
+    "/path/to/pi-atlas/extensions/askuser",
+    "/path/to/pi-atlas/extensions/bash-timeout"
   ]
 }
 ```
@@ -64,7 +81,11 @@ ln -s /path/to/pi-atlas/extensions/askuser ~/.pi/agent/extensions/askuser
 
 ### AskUser timeout
 
-Create `~/.pi/agent/askuser-config.json`:
+The config file is created at `session_start` at:
+
+```
+~/.pi/atlas/sessions/<sessionId>/askuser/config.json
+```
 
 ```json
 {
@@ -75,11 +96,44 @@ Create `~/.pi/agent/askuser-config.json`:
 - `0` — wait indefinitely (default).
 - `>0` — timeout in seconds. On timeout: confirm → `false`, select → `default` or `(no answer / timed out)`, input → `default` or `(no answer / timed out)`.
 
-Project-level config at `<cwd>/.pi/askuser-config.json` overrides the global config.
+The file is re-read on every `ask_user` call, so other extensions can overwrite it at any time to change the timeout dynamically.
 
 ### Agent nesting depth
 
 Set `PI_ATLAS_TASK_DEPTH` in the environment. The top-level session defaults to 0; each spawned agent increments by 1. Tasks exceeding `MAX_AGENT_DEPTH` (default: 3) are rejected.
+
+### Agent presets
+
+Built-in agents (always available):
+
+| Agent | Description | Tools |
+|------|-------------|-------|
+| `explorer` | Fast codebase recon returning compressed context | read, grep, find, ls, bash |
+| `code-reviewer` | Read-only code review against requirements and quality | read, grep, bash |
+| `general` | General-purpose, no special prompt | (all tools) |
+
+Custom agents are `.md` files in `.pi/agents/` (project) or `~/.pi/agents/` (user):
+
+```yaml
+---
+description: Summarizer agent
+model: claude-haiku-4-5
+tools: read, grep
+prefix: |
+  You are a summarizer. Be concise.
+suffix: |
+  Output as a bullet list.
+---
+```
+
+- `description` (required) — shown in the CreateAgent tool listing.
+- `prefix` / `suffix` (at least one required) — wrap the task prompt.
+- `model` (optional) — model override.
+- `tools` (optional) — comma-separated tool allowlist.
+
+Resolution order: project `.pi/agents/` (nearest, upward) → user `~/.pi/agents/` → built-in.
+
+Specifying a non-existent agent returns an error with the full available agents list.
 
 ## Development
 
@@ -93,19 +147,26 @@ npm test            # run all test suites
 
 ```
 extensions/
+├── shared/
+│   └── atlas-paths.ts        # Shared path helpers (~/.pi/atlas/sessions/<sid>/)
 ├── task/
 │   ├── index.ts              # Extension entry — registers tools + events
 │   ├── types.ts              # Task / TaskUsage / TaskResult types
 │   ├── task-manager.ts       # Lifecycle, state machine, session isolation
-│   ├── persistence.ts        # ~/.pi/tasks/<sessionId>/ persistence
+│   ├── persistence.ts        # ~/.pi/atlas/sessions/<sid>/task/ persistence
 │   ├── output-accumulator.ts # Bounded-memory output tracking + temp file spill
 │   ├── bash-task.ts          # CreateBash tool
-│   ├── agent-task.ts         # CreateAgent + ResumeTask tools
+│   ├── agent-task.ts         # CreateAgent + ResumeTask tools + dynamic description builder
+│   ├── agents.ts             # Agent preset system — built-ins, discovery, prompt wrapping
 │   ├── control.ts            # AwaitTask / CancelTask / ListTask / WatchTask
 │   └── guard.ts              # agent_settled guard
-└── askuser/
-    ├── index.ts              # Extension entry — registers ask_user tool
-    └── config.ts             # Session-level timeout config reader
+├── askuser/
+│   ├── index.ts              # Extension entry — registers ask_user tool
+│   ├── config.ts             # Per-session timeout config reader
+│   └── multi-question.ts     # TUI multi-question component (← → navigation + inline editor)
+└── bash-timeout/
+    ├── index.ts              # Extension entry — tool_call + tool_result handlers
+    └── detect.ts            # Search command detection (regex + shell-quote)
 ```
 
 ## License
