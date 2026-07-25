@@ -70,7 +70,8 @@ export interface BridgeOptions {
   idFactory?: () => string;
 }
 
-/** Replicate pi's per-cwd session directory naming (getDefaultSessionDirPath). */
+/** Replicate pi's per-cwd session directory naming (getDefaultSessionDirPath).
+ *  Not imported from the SDK because it isn't re-exported from the package root. */
 function encodeCwd(cwd: string): string {
   const resolved = resolve(cwd);
   return `--${resolved.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
