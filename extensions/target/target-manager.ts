@@ -12,11 +12,14 @@
 
 import { loadTargetState, saveTargetState } from "./persistence.js";
 import {
+  TARGET_CHANGED_CHANNEL,
   defaultTargetState,
+  type TargetChangedPayload,
   type TargetItem,
   type TargetState,
   type TargetStatus,
 } from "./types.js";
+import type { EventBus } from "@earendil-works/pi-coding-agent";
 
 /** Sentinel id for the primary target. */
 export const PRIMARY_ID = 0;
@@ -33,6 +36,8 @@ export interface TargetResult {
 class TargetManager {
   /** Per-session in-memory state. */
   private states = new Map<string, TargetState>();
+  /** Shared event bus for emitting target changes (set at session_start). */
+  private eventBus?: EventBus;
 
   // ---------------------------------------------------------------------------
   // Session lifecycle
@@ -58,6 +63,15 @@ class TargetManager {
   // ---------------------------------------------------------------------------
   // Read access
   // ---------------------------------------------------------------------------
+
+  /**
+   * Inject the shared event bus (called by the target extension at session_start
+   * with `pi.events`). Once set, every persisting mutation emits a
+   * `pi-atlas:target_changed` event carrying the new TargetState.
+   */
+  setEventBus(bus: EventBus): void {
+    this.eventBus = bus;
+  }
 
   /** Get the in-memory state for a session (creates a default if missing). */
   getState(sessionId: string): TargetState {
@@ -106,6 +120,7 @@ class TargetManager {
     };
 
     await this.persist(sessionId, state);
+    this.emitChange(sessionId);
     return {
       state,
       message: `Primary target set: ${text}`,
@@ -135,6 +150,7 @@ class TargetManager {
     state.secondary.push(item);
 
     await this.persist(sessionId, state);
+    this.emitChange(sessionId);
     return {
       state,
       message: `Secondary target [#${nextId}] added: ${text}`,
@@ -175,6 +191,7 @@ class TargetManager {
       }
 
       await this.persist(sessionId, state);
+      this.emitChange(sessionId);
       const changed: string[] = [];
       if (status !== undefined) {
         const verb =
@@ -203,6 +220,7 @@ class TargetManager {
     if (note !== undefined) item.note = note;
 
     await this.persist(sessionId, state);
+    this.emitChange(sessionId);
     const changed: string[] = [];
     if (status !== undefined) changed.push(`set to ${status}`);
     if (text !== undefined) changed.push("text updated");
@@ -257,6 +275,7 @@ class TargetManager {
     }));
 
     await this.persist(sessionId, state);
+    this.emitChange(sessionId);
 
     const parts: string[] = [];
     if (skipped.length > 0) {
@@ -287,6 +306,7 @@ class TargetManager {
     state.autoContinue = true;
 
     await this.persist(sessionId, state);
+    this.emitChange(sessionId);
     return {
       state,
       message: `Goal activated: ${text}`,
@@ -307,6 +327,7 @@ class TargetManager {
     state.autoContinue = false;
 
     await this.persist(sessionId, state);
+    this.emitChange(sessionId);
     return {
       state,
       message: "Auto-continue turned off. Primary target can now be modified.",
@@ -331,6 +352,7 @@ class TargetManager {
     state.autoContinue = true;
 
     await this.persist(sessionId, state);
+    this.emitChange(sessionId);
     return {
       state,
       message: `Auto-continue activated for: ${state.primary.text}`,
@@ -392,6 +414,21 @@ class TargetManager {
   // ---------------------------------------------------------------------------
   // Internal
   // ---------------------------------------------------------------------------
+
+  /**
+   * Emit a `pi-atlas:target_changed` event carrying the current TargetState.
+   * No-op when no event bus is wired (e.g. unit tests / non-bridge usage).
+   * The payload is a deep clone so receivers cannot mutate in-memory state.
+   */
+  private emitChange(sessionId: string): void {
+    if (!this.eventBus) return;
+    const state = this.states.get(sessionId);
+    if (!state) return;
+    this.eventBus.emit(TARGET_CHANGED_CHANNEL, {
+      sessionId,
+      state: structuredClone(state),
+    } satisfies TargetChangedPayload);
+  }
 
   /** Persist in-memory state to disk (fire-and-forget, errors logged). */
   private async persist(

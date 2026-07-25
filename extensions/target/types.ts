@@ -61,3 +61,16 @@ export function defaultTargetState(): TargetState {
     autoContinue: false,
   };
 }
+
+/**
+ * Channel emitted on every TargetState change (consumed by the pi-acp-v2 bridge
+ * to forward Target progress as ACP plan variants). Defined here as the
+ * emitter's public contract so the adapter and the manager share one source.
+ */
+export const TARGET_CHANGED_CHANNEL = "pi-atlas:target_changed";
+
+/** Payload of a `pi-atlas:target_changed` event. */
+export interface TargetChangedPayload {
+  sessionId: string;
+  state: TargetState;
+}

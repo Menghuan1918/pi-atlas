@@ -50,8 +50,10 @@ export default function targetExtension(pi: ExtensionAPI): void {
 
   // ── Events ──────────────────────────────────────────────────────────
 
-  // session_start: restore persisted target state from disk.
+  // session_start: wire the shared event bus (A2 emits target_changed), then
+  // restore persisted target state from disk.
   pi.on("session_start", async (_event, ctx) => {
+    targetManager.setEventBus(pi.events);
     const sessionId = ctx.sessionManager.getSessionId();
     await targetManager.restoreSession(sessionId);
   });

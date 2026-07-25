@@ -158,6 +158,31 @@ export function toolUseTurnEvents(filePath: string): AssistantMessageEvent[] {
   ];
 }
 
+/** Events for a turn that calls the pi-atlas `Target` tool with the given action/args, then stops with toolUse. */
+export function targetToolTurnEvents(action: string, args: Record<string, unknown> = {}): AssistantMessageEvent[] {
+  const toolCall: ToolCall = { type: "toolCall", id: "tc-target", name: "Target", arguments: { action, ...args } };
+  const msg = makeAssistantMessage([{ type: "text", text: "Managing target." }, toolCall], "toolUse");
+  return [
+    { type: "start", partial: msg },
+    { type: "text_start", contentIndex: 0, partial: msg },
+    { type: "text_delta", contentIndex: 0, delta: "Managing target.", partial: msg },
+    { type: "text_end", contentIndex: 0, content: "Managing target.", partial: msg },
+    { type: "toolcall_start", contentIndex: 1, partial: msg },
+    { type: "toolcall_delta", contentIndex: 1, delta: JSON.stringify({ action, ...args }), partial: msg },
+    { type: "toolcall_end", contentIndex: 1, toolCall, partial: msg },
+    { type: "done", reason: "toolUse", message: msg },
+  ];
+}
+
+/** Script: turn i performs the i-th Target step (action+args); beyond the steps, replies "Done." */
+export function targetScript(steps: Array<{ action: string; args?: Record<string, unknown> }>): FakeScript {
+  return ({ callIndex }) => {
+    const step = steps[callIndex];
+    if (!step) return textTurnEvents("Done.");
+    return targetToolTurnEvents(step.action, step.args);
+  };
+}
+
 /** Script: turn 0 calls `read` on `filePath` (tool use); turn 1 replies "Done." */
 export function toolUseScript(filePath: string): FakeScript {
   return ({ callIndex }) => (callIndex === 0 ? toolUseTurnEvents(filePath) : textTurnEvents("Done."));

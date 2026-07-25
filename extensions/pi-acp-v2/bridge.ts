@@ -37,6 +37,13 @@ import {
 import { UpdateMapper, toContentBlocks, type PiMessage } from "./mapping.js";
 import { MessageIdMap } from "./message-map.js";
 import {
+  TARGET_CHANGED_CHANNEL,
+  isTargetStateEmpty,
+  toPlanRemoved,
+  toPlanUpdate,
+} from "./plan-map.js";
+import type { TargetState } from "../target/types.js";
+import {
   ADAPTER_NAME,
   ADAPTER_TITLE,
   ADAPTER_VERSION,
@@ -58,6 +65,10 @@ export interface SessionHandle {
   turnInProgress: boolean;
   /** True once a real turn started (agent_start); distinguishes no-turn resolves (slash commands). */
   turnRan: boolean;
+  /** True once this session has had a non-empty target (drives plan_removed vs no-op). */
+  hasHadTarget: boolean;
+  /** Last TargetState JSON sent as a plan (dedup: skip identical re-sends). */
+  lastPlanStateJson: string | null;
 }
 
 export interface BridgeOptions {
@@ -129,6 +140,10 @@ export class PiAcpBridge {
   private readonly uiContext?: ExtensionUIContext;
   private readonly extensionFactories?: InlineExtension[];
   private readonly idFactory: () => string;
+  /** Per-session pending TargetState (latest wins) awaiting a microtask flush. */
+  private readonly pendingTargetStates = new Map<string, TargetState>();
+  /** True while a microtask flush is scheduled (coalesces same-batch emits). */
+  private flushScheduled = false;
 
   /** Client context for sending notifications (captured on connect). */
   client: AgentContext | null = null;
@@ -143,6 +158,8 @@ export class PiAcpBridge {
     this.uiContext = options.uiContext;
     this.extensionFactories = options.extensionFactories;
     this.idFactory = options.idFactory ?? defaultIdFactory;
+    // A2: forward pi Target progress to the client as ACP plan variants.
+    this.eventBus.on(TARGET_CHANGED_CHANNEL, (data) => this.onTargetChanged(data));
   }
 
   /** Called when the ACP connection opens — capture the client for notifications. */
@@ -324,6 +341,8 @@ export class PiAcpBridge {
       pendingUserMessageId: null,
       turnInProgress: false,
       turnRan: false,
+      hasHadTarget: false,
+      lastPlanStateJson: null,
     };
     session.subscribe((ev) => this.onPiEvent(handle, ev));
     this.sessions.set(handle.sessionId, handle);
@@ -372,6 +391,61 @@ export class PiAcpBridge {
     }
   }
 
+  // ---- A2: target → plan forwarding ---------------------------------------
+
+  /** Handle a `pi-atlas:target_changed` event: stage the state, coalesce, flush. */
+  private onTargetChanged(data: unknown): void {
+    const d = data as { sessionId?: unknown; state?: unknown };
+    if (
+      typeof d?.sessionId !== "string" ||
+      !d?.state ||
+      typeof d.state !== "object" ||
+      Array.isArray(d.state)
+    ) {
+      return; // malformed payload — skip this update (Spec §5)
+    }
+    this.pendingTargetStates.set(d.sessionId, d.state as TargetState);
+    this.schedulePlanFlush();
+  }
+
+  /** Coalesce same-batch emits into a single microtask flush (avoids storms). */
+  private schedulePlanFlush(): void {
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    queueMicrotask(() => {
+      this.flushScheduled = false;
+      this.flushPendingPlans();
+    });
+  }
+
+  /** Emit one plan variant per pending session (dedup by serialized state). */
+  private flushPendingPlans(): void {
+    if (this.pendingTargetStates.size === 0) return;
+    const pending = [...this.pendingTargetStates.entries()];
+    this.pendingTargetStates.clear();
+    for (const [sessionId, state] of pending) {
+      const handle = this.sessions.get(sessionId);
+      if (!handle) continue; // session closed/gone
+      const json = JSON.stringify(state);
+      if (isTargetStateEmpty(state)) {
+        // Cleared: only send plan_removed if we previously sent a plan.
+        if (handle.hasHadTarget) {
+          this.notify(sessionId, toPlanRemoved());
+          handle.hasHadTarget = false;
+          handle.lastPlanStateJson = null;
+        }
+        // else: never had a target → emit nothing (Spec §6.5)
+      } else {
+        handle.hasHadTarget = true;
+        if (json !== handle.lastPlanStateJson) {
+          this.notify(sessionId, toPlanUpdate(state));
+          handle.lastPlanStateJson = json;
+        }
+        // else: identical to last sent → skip (dedup, Spec §6.3)
+      }
+    }
+  }
+
   /** Replay the active branch as user_message / agent_message updates (resume). */
   private replayBranch(handle: SessionHandle): void {
     const branch = handle.sessionManager.getBranch();
@@ -398,6 +472,7 @@ export class PiAcpBridge {
     } catch {
       // ignore
     }
+    this.pendingTargetStates.delete(handle.sessionId);
     this.sessions.delete(handle.sessionId);
   }
 

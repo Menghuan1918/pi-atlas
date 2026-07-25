@@ -30,10 +30,13 @@ import {
   DEFAULT_FAKE_SCRIPT,
   FAKE_MODEL,
   hangingTurnEvents,
+  targetScript,
+  textTurnEvents,
   toolUseScript,
   type FakeScript,
 } from "../extensions/pi-acp-v2/fake-model.js";
 import { clientDeclares, VENDOR_CAPABILITIES } from "../extensions/pi-acp-v2/types.js";
+import targetExtension from "../extensions/target/index.js";
 
 let pass = 0;
 let fail = 0;
@@ -53,13 +56,14 @@ function sleep(ms: number): Promise<void> {
 type UpdateNotification = { sessionId: string; update: SessionUpdate };
 
 /** In-process ACP harness: bridge + apps + collected session/update notifications. */
-function harness(opts: { script?: FakeScript; clientMeta?: Record<string, unknown>; idFactory?: () => string; extensionFactories?: InlineExtension[] }) {
+function harness(opts: { script?: FakeScript; clientMeta?: Record<string, unknown>; idFactory?: () => string; extensionFactories?: InlineExtension[]; agentDir?: string }) {
   const updates: UpdateNotification[] = [];
   const bridge = new PiAcpBridge({
     model: FAKE_MODEL,
     modelRuntime: createFakeModelRuntime(opts.script ?? DEFAULT_FAKE_SCRIPT),
     idFactory: opts.idFactory,
     extensionFactories: opts.extensionFactories,
+    agentDir: opts.agentDir,
   });
   const app = createAgentApp(bridge);
   const clientApp = acp
@@ -421,7 +425,9 @@ async function testSubprocessFramingAndEof(): Promise<void> {
 
   try {
     const initId = send("initialize", { protocolVersion: 2, info: { name: "c", version: "1" }, capabilities: {} });
-    const init = await waitForResponse(initId);
+    // Allow ample time for the `npx tsx` cold start (module resolution + compile)
+    // before the first response arrives; 5s was too tight under CI load.
+    const init = await waitForResponse(initId, 15000);
     check(init?.result && (init.result as any).protocolVersion === 2, "initialize response over stdio");
 
     const newId = send("session/new", { cwd: "/tmp" });
@@ -432,6 +438,20 @@ async function testSubprocessFramingAndEof(): Promise<void> {
     const promptId = send("session/prompt", { sessionId, prompt: [{ type: "text", text: "Hello" }] });
     const promptResp = await waitForResponse(promptId);
     check(promptResp?.result !== undefined && JSON.stringify(promptResp.result) === "{}", "session/prompt returns {} over stdio");
+
+    // The user_message notification is sent on a deferred macrotask (bridge setTimeout(0));
+    // wait for it to flush over stdio + be parsed before asserting ordering (§4.5).
+    const userMsgDeadline = Date.now() + 5000;
+    while (
+      Date.now() < userMsgDeadline &&
+      !lines.some((l) => {
+        try {
+          const m = JSON.parse(l);
+          return m.method === "session/update" && m.params?.update?.sessionUpdate === "user_message";
+        } catch { return false; }
+      })
+    )
+      await sleep(10);
 
     // §4.5: the prompt response must NOT be preempted by user_message.
     const promptRespIdx = lines.findIndex((l) => {
@@ -486,6 +506,159 @@ async function testSubprocessFramingAndEof(): Promise<void> {
   }
 }
 
+// ---- A2: plan_update bridge (Target tool + /goal command paths) ------------
+
+/** Fresh temp PI_ATLAS_DIR so target state.json never leaks across tests/runs. */
+function freshAtlasDir(): string {
+  return mkdtempSync(join(tmpdir(), "pi-acp-plan-"));
+}
+
+/** Collect plan_update / plan_removed notifications from the update stream. */
+function planNotifications(updates: UpdateNotification[]) {
+  const planUpdates = updates.filter((u) => u.update.sessionUpdate === "plan_update");
+  const planRemoved = updates.filter((u) => u.update.sessionUpdate === "plan_removed");
+  return { planUpdates, planRemoved };
+}
+
+async function testPlanTargetToolPath(): Promise<void> {
+  console.log("plan: Target tool call → plan_update");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  // turn 0: add "sub task A" (plan_update [{A}]); turn 1: add "sub task B" (plan_update [{A},{B}]); turn 2: Done.
+  const script = targetScript([
+    { action: "add", args: { text: "sub task A" } },
+    { action: "add", args: { text: "sub task B" } },
+  ]);
+  const { app, clientApp, updates } = harness({ script, extensionFactories: [targetExtension], agentDir: atlasDir });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "add targets" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "tool-use turns settle to idle");
+      const { planUpdates } = planNotifications(updates);
+      check(planUpdates.length >= 1, `received plan_update (got ${planUpdates.length})`);
+      const last = planUpdates[planUpdates.length - 1].update as { plan?: { type?: string; planId?: string; entries?: Array<{ content: string; priority: string; status: string; _meta?: { id: number } }> } };
+      check(last.plan?.type === "items", "plan.type=items");
+      check(last.plan?.planId === "pi-targets", "planId=pi-targets");
+      const entries = last.plan?.entries ?? [];
+      check(entries.length === 2, `final plan has 2 entries (got ${entries.length})`);
+      check(entries[0]?.content === "sub task A" && entries[0]?._meta?.id === 1, "entry 0 = first secondary");
+      check(entries[1]?.content === "sub task B" && entries[1]?._meta?.id === 2, "entry 1 = second secondary");
+      check(entries.every((e) => e.priority === "medium"), "all priority=medium");
+      check(entries.every((e) => e.status === "in_progress"), "all status=in_progress (active→in_progress)");
+    });
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
+async function testPlanGoalCommandPath(): Promise<void> {
+  console.log("plan: /goal command → plan_update");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  const script: FakeScript = ({ callIndex }) => (callIndex === 0 ? textTurnEvents("Working on it.") : textTurnEvents("Done."));
+  const { app, clientApp, updates } = harness({ script, extensionFactories: [targetExtension], agentDir: atlasDir });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "/goal ship the feature" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "/goal turn settles to idle");
+      const { planUpdates } = planNotifications(updates);
+      check(planUpdates.length >= 1, `received plan_update from /goal (got ${planUpdates.length})`);
+      const last = planUpdates[planUpdates.length - 1].update as { plan?: { planId?: string; entries?: Array<{ content: string; status: string; _meta?: { id: number } }> } };
+      check(last.plan?.planId === "pi-targets", "planId=pi-targets");
+      const entries = last.plan?.entries ?? [];
+      check(entries.length === 1, "primary is the single entry");
+      check(entries[0]?.content.includes("ship the feature"), "entry content includes goal text");
+      check(entries[0]?.status === "in_progress", "primary active→in_progress");
+      check(entries[0]?._meta?.id === 0, "primary _meta.id=0");
+    });
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
+async function testPlanDedup(): Promise<void> {
+  console.log("plan: dedup — identical re-emit sends a single plan_update");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  // Two turns, both set the SAME full state → second emit is deduped (no new plan_update).
+  const script = targetScript([
+    { action: "update_targets", args: { text: "P", secondary: [{ text: "S" }] } },
+    { action: "update_targets", args: { text: "P", secondary: [{ text: "S" }] } },
+  ]);
+  const { app, clientApp, updates } = harness({ script, extensionFactories: [targetExtension], agentDir: atlasDir });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "set targets twice" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "turns settle to idle");
+      const { planUpdates } = planNotifications(updates);
+      check(planUpdates.length === 1, `identical re-emit → single plan_update (got ${planUpdates.length})`);
+    });
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
+async function testPlanRemovedOnClear(): Promise<void> {
+  console.log("plan: clear targets → plan_removed");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  // turn 0: add a secondary (state non-empty → plan_update). turn 1: update_targets with secondary:[]
+  // (primaryText null → primary stays null; secondary cleared → empty state → plan_removed).
+  const script = targetScript([
+    { action: "add", args: { text: "temp task" } },
+    { action: "update_targets", args: { secondary: [] } },
+  ]);
+  const { app, clientApp, updates } = harness({ script, extensionFactories: [targetExtension], agentDir: atlasDir });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "manage" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "turns settle to idle");
+      const { planUpdates, planRemoved } = planNotifications(updates);
+      check(planUpdates.length >= 1, "received plan_update when a target was added");
+      check(planRemoved.length >= 1, `received plan_removed on clear (got ${planRemoved.length})`);
+      const removed = planRemoved[planRemoved.length - 1].update as { planId?: string };
+      check(removed.planId === "pi-targets", "plan_removed planId=pi-targets");
+      const idxUpdate = updates.findIndex((u) => u.update.sessionUpdate === "plan_update");
+      const idxRemoved = updates.findIndex((u) => u.update.sessionUpdate === "plan_removed");
+      check(idxUpdate !== -1 && idxRemoved !== -1 && idxUpdate < idxRemoved, "plan_update precedes plan_removed");
+    });
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
+async function testNoPlanWhenNeverHadTarget(): Promise<void> {
+  console.log("plan: never had a target → no plan emitted");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  const { app, clientApp, updates } = harness({ extensionFactories: [targetExtension], agentDir: atlasDir });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hello" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "turn settles to idle");
+      const { planUpdates, planRemoved } = planNotifications(updates);
+      check(planUpdates.length === 0 && planRemoved.length === 0, `no plan emitted when no target ever set (got ${planUpdates.length}+${planRemoved.length})`);
+    });
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
 async function main(): Promise<void> {
   await testInitializeAndCapabilities();
   await testPromptStreaming();
@@ -497,6 +670,11 @@ async function main(): Promise<void> {
   await testAskUserCapabilityNoCrash();
   await testMessageIdEntryMapping();
   await testSlashCommandNoDeadlock();
+  await testPlanTargetToolPath();
+  await testPlanGoalCommandPath();
+  await testPlanDedup();
+  await testPlanRemovedOnClear();
+  await testNoPlanWhenNeverHadTarget();
   await testSubprocessFramingAndEof();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
