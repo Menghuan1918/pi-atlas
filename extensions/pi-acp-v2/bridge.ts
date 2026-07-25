@@ -51,8 +51,10 @@ export interface SessionHandle {
   mapper: UpdateMapper;
   messageMap: MessageIdMap;
   cwd: string;
-  /** messageId awaiting its user entry (recorded on entry_appended). */
+  /** messageId awaiting its user entry (recorded on message_end). */
   pendingUserMessageId: string | null;
+  /** Adapter-level busy flag (set synchronously in prompt(); cleared on settle). */
+  turnInProgress: boolean;
 }
 
 export interface BridgeOptions {
@@ -165,7 +167,8 @@ export class PiAcpBridge {
   }
 
   async newSession(params: { cwd: string; mcpServers?: unknown[]; additionalDirectories?: string[] }): Promise<{ sessionId: string }> {
-    // A1 ignores mcpServers/additionalDirectories (MCP-over-ACP is out of scope; TODO A2).
+    // A1 ignores mcpServers (MCP-over-ACP out of scope) and additionalDirectories
+    // (pi SDK createAgentSession has no multi-root option; deferred).
     const sessionManager = SessionManager.create(params.cwd, piSessionDir(params.cwd, this.agentDir));
     const handle = await this.createSession(params.cwd, sessionManager);
     return { sessionId: handle.sessionId };
@@ -194,6 +197,8 @@ export class PiAcpBridge {
     if (!match) throw new RequestError(-32602, `Unknown session: ${params.sessionId}`);
     const sessionManager = SessionManager.open(match.path);
     const handle = await this.createSession(params.cwd, sessionManager);
+    // replayFrom omitted/null → resume WITHOUT replaying history (session loaded, ready for new prompts);
+    // replayFrom {type:"start"} → replay the whole active branch as user/agent messages.
     if (params.replayFrom?.type === "start") {
       this.replayBranch(handle);
     }
@@ -209,7 +214,11 @@ export class PiAcpBridge {
 
   prompt(sessionId: string, promptBlocks: ContentBlock[]): Record<string, never> {
     const handle = this.getHandle(sessionId);
-    if (handle.session.isStreaming) throw new RequestError(-32000, "session busy");
+    // Check an adapter-level flag (not just session.isStreaming): isStreaming is only
+    // set once the deferred turn starts, so two back-to-back prompts would both pass
+    // a streaming-only check. turnInProgress is set synchronously here, before return.
+    if (handle.session.isStreaming || handle.turnInProgress) throw new RequestError(-32000, "session busy");
+    handle.turnInProgress = true;
     const userMessageId = this.idFactory();
     handle.pendingUserMessageId = userMessageId;
     handle.mapper.reset();
@@ -220,8 +229,15 @@ export class PiAcpBridge {
     // response. setTimeout(0) runs after the response write chain, preserving order:
     // response {} → user_message → state_update:running → …)
     setTimeout(() => {
+      // Session may have been closed during the macrotask gap.
+      if (!this.sessions.has(sessionId)) {
+        handle.turnInProgress = false;
+        return;
+      }
       this.notify(sessionId, { sessionUpdate: "user_message", messageId: userMessageId, content: promptBlocks });
       void handle.session.prompt(text).catch((err) => {
+        handle.turnInProgress = false;
+        handle.pendingUserMessageId = null;
         this.notify(sessionId, { sessionUpdate: "state_update", state: "idle", stopReason: "refusal" });
         this.logError("prompt error", err);
       });
@@ -277,6 +293,7 @@ export class PiAcpBridge {
       messageMap: new MessageIdMap(),
       cwd,
       pendingUserMessageId: null,
+      turnInProgress: false,
     };
     session.subscribe((ev) => this.onPiEvent(handle, ev));
     this.sessions.set(handle.sessionId, handle);
@@ -298,6 +315,7 @@ export class PiAcpBridge {
   private onPiEvent(handle: SessionHandle, event: AgentSessionEvent): void {
     const updates = handle.mapper.reduce(event);
     for (const u of updates) this.notify(handle.sessionId, u);
+    if (event.type === "agent_settled") handle.turnInProgress = false;
 
     // Record messageId ↔ entryId. pi emits message_end BEFORE persisting the entry
     // (appendMessage runs synchronously right after the emit), so defer one tick and

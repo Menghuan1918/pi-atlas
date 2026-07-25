@@ -16,7 +16,7 @@
  * Run: tsx scripts/test-pi-acp-v2.ts
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as acp from "@agentclientprotocol/sdk/experimental/v2";
@@ -29,6 +29,7 @@ import {
   DEFAULT_FAKE_SCRIPT,
   FAKE_MODEL,
   hangingTurnEvents,
+  toolUseScript,
   type FakeScript,
 } from "../extensions/pi-acp-v2/fake-model.js";
 import { clientDeclares, VENDOR_CAPABILITIES } from "../extensions/pi-acp-v2/types.js";
@@ -165,22 +166,65 @@ async function testCancel(): Promise<void> {
 }
 
 async function testSessionBusy(): Promise<void> {
-  console.log("session/prompt while busy → -32000");
-  const script: FakeScript = () => hangingTurnEvents("working");
-  const { app, clientApp, updates } = harness({ script });
+  console.log("session/prompt while busy → -32000 (race)");
+  const { app, clientApp, updates } = harness({});
   await withClient(app, clientApp, async (c) => {
     await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
     const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
-    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "go" }] });
-    while (!updates.some((u) => (u.update as { state?: string }).state === "running")) await sleep(5);
+    // Fire two prompts without awaiting the first → both buffered before the
+    // deferred turn starts. The second must reject -32000 (turnInProgress is set
+    // synchronously in prompt(), closing the macrotask-gap race).
+    const p1 = req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "first" }] });
+    const p2 = req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "second" }] });
+    await p1;
     let code: number | undefined;
     try {
-      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "again" }] });
+      await p2;
     } catch (e) {
       if (isErr(e)) code = e.code;
     }
-    check(code === -32000, `busy prompt → -32000 (got ${code})`);
+    check(code === -32000, `2nd prompt while 1st pending → -32000 (got ${code})`);
+    await waitForIdle(updates);
   });
+}
+
+async function testToolUseTurn(): Promise<void> {
+  console.log("tool-use turn (multi-message + tool_call_update)");
+  const tmpFile = join(tmpdir(), `pi-acp-tool-${Date.now()}.txt`);
+  writeFileSync(tmpFile, "file-contents");
+  const { bridge, app, clientApp, updates } = harness({ script: toolUseScript(tmpFile) });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "read it" }] });
+      const ok = await waitForIdle(updates, 6000);
+      check(ok, "tool-use turn settles to idle");
+
+      const toolUpdates = updates.filter((u) => u.update.sessionUpdate === "tool_call_update");
+      check(toolUpdates.length >= 2, `received >=2 tool_call_update (got ${toolUpdates.length})`);
+      const withContent = toolUpdates.find((u) => (u.update as { content?: unknown[] }).content);
+      check(!!withContent, "a tool_call_update carries content");
+      const c0 = (withContent!.update as { content?: Array<{ type: string; content?: { type: string } }> }).content?.[0];
+      check(c0?.type === "content" && c0?.content?.type === "text", "tool content is ToolCallContent{type:content,content{text}}");
+
+      // Two distinct assistant messageIds (turn 0 tool-use msg + turn 1 text msg), both mapped.
+      const ids = new Set(
+        updates
+          .filter((u) => u.update.sessionUpdate === "agent_message_chunk" || u.update.sessionUpdate === "agent_message")
+          .map((u) => (u.update as { messageId: string }).messageId),
+      );
+      check(ids.size >= 2, `two distinct assistant messageIds (got ${ids.size})`);
+      const handle = bridge.getSessionHandle(sessionId);
+      const allMapped = [...ids].every((id) => handle?.messageMap.getEntryId(id) !== undefined);
+      check(allMapped, "both assistant messageIds mapped to entryIds");
+
+      const idle = updates[updates.length - 1].update as { sessionUpdate: string; state?: string; stopReason?: string };
+      check(idle.sessionUpdate === "state_update" && idle.state === "idle" && idle.stopReason === "end_turn", "ends idle+end_turn");
+    });
+  } finally {
+    rmSync(tmpFile, { force: true });
+  }
 }
 
 async function testListAndResume(): Promise<void> {
@@ -420,6 +464,7 @@ async function main(): Promise<void> {
   await testPromptStreaming();
   await testCancel();
   await testSessionBusy();
+  await testToolUseTurn();
   await testListAndResume();
   await testCloseAndErrors();
   await testAskUserCapabilityNoCrash();

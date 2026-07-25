@@ -21,6 +21,7 @@ import {
   type AssistantMessageEventStream,
   type Context,
   type Model,
+  type ToolCall,
   type Usage,
 } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -139,6 +140,27 @@ export function createFakeModelRuntime(script: FakeScript): ModelRuntime {
       return stream;
     },
   } as unknown as ModelRuntime;
+}
+
+/** Events for a turn that calls the built-in `read` tool on `filePath`, then stops with toolUse. */
+export function toolUseTurnEvents(filePath: string): AssistantMessageEvent[] {
+  const toolCall: ToolCall = { type: "toolCall", id: "tc1", name: "read", arguments: { path: filePath } };
+  const msg = makeAssistantMessage([{ type: "text", text: "Reading file." }, toolCall], "toolUse");
+  return [
+    { type: "start", partial: msg },
+    { type: "text_start", contentIndex: 0, partial: msg },
+    { type: "text_delta", contentIndex: 0, delta: "Reading file.", partial: msg },
+    { type: "text_end", contentIndex: 0, content: "Reading file.", partial: msg },
+    { type: "toolcall_start", contentIndex: 1, partial: msg },
+    { type: "toolcall_delta", contentIndex: 1, delta: JSON.stringify({ path: filePath }), partial: msg },
+    { type: "toolcall_end", contentIndex: 1, toolCall, partial: msg },
+    { type: "done", reason: "toolUse", message: msg },
+  ];
+}
+
+/** Script: turn 0 calls `read` on `filePath` (tool use); turn 1 replies "Done." */
+export function toolUseScript(filePath: string): FakeScript {
+  return ({ callIndex }) => (callIndex === 0 ? toolUseTurnEvents(filePath) : textTurnEvents("Done."));
 }
 
 /** Default fake script for the env-gated server: echo the user's text. */
