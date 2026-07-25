@@ -84,7 +84,7 @@ TargetState { primary: TargetItem | null; secondary: TargetItem[]; autoContinue:
 | `set` | 设置/更新主 target 文本。autoContinue=true 时拒绝（主 target 被用户锁定） |
 | `add` | 添加次 target，返回新 id |
 | `update` | 更新任意 target 状态。id=0 + completed/failed → 关闭 auto-continue |
-| `update_targets` | 全量覆盖所有 target。autoContinue=true 时自动跳过主 target（部分失败），只覆盖次 target |
+| `update_targets` | 全量覆盖所有 target。省略 text 时保留现有主 target，只替换次 target。autoContinue=true 时自动跳过主 target（部分失败），只覆盖次 target |
 | `list` | 列出所有 target 及状态 |
 
 ### /goal 命令（仅用户触发）

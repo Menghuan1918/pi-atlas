@@ -33,7 +33,8 @@ const targetParameters = Type.Object({
   }),
   text: Type.Optional(
     Type.String({
-      description: "Target text. Required for 'set' and 'add'.",
+      description:
+        "Target text. Required for 'set' and 'add'. For 'update', replaces the target's text. For 'update_targets', the new primary target text (omit to preserve the existing primary).",
     }),
   ),
   id: Type.Optional(
@@ -44,18 +45,12 @@ const targetParameters = Type.Object({
   ),
   status: Type.Optional(
     StringEnum(["active", "completed", "failed"], {
-      description: "New status for 'update'. 'completed' or 'failed' are terminal.",
+      description: "New status for 'update'. 'completed' or 'failed' are terminal. Optional — omit to update only text/note.",
     }),
   ),
   note: Type.Optional(
     Type.String({
-      description: "Optional completion summary or failure reason for 'update'.",
-    }),
-  ),
-  primary_text: Type.Optional(
-    Type.String({
-      description:
-        "New primary target text for 'update_targets'. Omit to clear the primary (only when auto-continue is off).",
+      description: "Optional note for 'update' — completion summary, failure reason, or arbitrary annotation.",
     }),
   ),
   secondary: Type.Optional(
@@ -104,8 +99,8 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
     promptGuidelines: [
       "Use Target(action: 'set', text: '...') to define the primary goal — what the user ultimately wants achieved.",
       "Use Target(action: 'add', text: '...') to break the goal into trackable sub-tasks.",
-      "Use Target(action: 'update_targets', primary_text: '...', secondary: [{text: '...', status: '...'}, ...]) to replace all targets at once. When auto-continue is active, the primary is skipped automatically.",
-      "Use Target(action: 'update', id: <id>, status: 'completed') to mark a target done. For id 0, this also stops auto-continue.",
+      "Use Target(action: 'update_targets', text: '...', secondary: [{text: '...', status: '...'}, ...]) to replace all targets at once. Omit text to update only secondary targets (existing primary is preserved).",
+      "Use Target(action: 'update', id: <id>, status: 'completed') to mark a target done. For id 0, this also stops auto-continue. status is optional — you can also update just text or note.",
       "Use Target(action: 'update', id: 0, status: 'failed', note: '...') if the goal cannot be achieved.",
       "Use Target(action: 'list') to review all targets and their current status.",
     ],
@@ -202,10 +197,10 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
             },
           };
         }
-        if (!params.status) {
+        if (params.status === undefined && params.text === undefined && params.note === undefined) {
           return {
             content: [
-              { type: "text", text: "Error: 'status' is required for 'update'." },
+              { type: "text", text: "Error: 'update' needs at least one of 'status', 'text', or 'note'." },
             ],
             details: {
               action,
@@ -217,8 +212,9 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
         const result = await targetManager.updateStatus(
           sessionId,
           params.id,
-          params.status as "active" | "completed" | "failed",
+          params.status as "active" | "completed" | "failed" | undefined,
           params.note,
+          params.text,
         );
         return {
           content: [{ type: "text", text: result.message }],
@@ -234,7 +230,7 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
       if (action === "update_targets") {
         const result = await targetManager.replaceTargets(
           sessionId,
-          params.primary_text ?? null,
+          params.text ?? null,
           (params.secondary ?? []).map((s) => ({
             text: s.text,
             status: s.status as "active" | "completed" | "failed" | undefined,

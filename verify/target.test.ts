@@ -235,7 +235,7 @@ async function main(): Promise<void> {
   // Full replace: primary + 3 secondary
   text = await callTool({
     action: "update_targets",
-    primary_text: "Overwrite primary",
+    text: "Overwrite primary",
     secondary: [
       { text: "Task A", status: "active" },
       { text: "Task B", status: "completed" },
@@ -249,18 +249,18 @@ async function main(): Promise<void> {
   assert(st.secondary[1]?.status === "completed", "secondary #2 status = completed");
   assert(st.secondary[2]?.note === "blocked", "secondary #3 note preserved");
 
-  // Full replace: clear primary (no primary_text), empty secondary
+  // Replace: omit text → preserve existing primary, replace secondary
   text = await callTool({
     action: "update_targets",
-    secondary: [],
+    secondary: [{ text: "Only secondary" }],
   });
   assert(
-    targetManager.getState(sessionId).primary === null,
-    "update_targets clears primary when no primary_text",
+    targetManager.getState(sessionId).primary?.text === "Overwrite primary",
+    "update_targets preserves primary when no text",
   );
   assert(
-    targetManager.getState(sessionId).secondary.length === 0,
-    "update_targets clears secondary",
+    targetManager.getState(sessionId).secondary.length === 1,
+    "update_targets replaces secondary",
   );
 
   // ── update_targets: auto-continue skips primary (partial failure) ──
@@ -269,7 +269,7 @@ async function main(): Promise<void> {
   const lockedPrimary = targetManager.getState(sessionId).primary?.text;
   text = await callTool({
     action: "update_targets",
-    primary_text: "Should be skipped",
+    text: "Should be skipped",
     secondary: [{ text: "New task" }, { text: "Another task" }],
   });
   assert(
@@ -296,8 +296,37 @@ async function main(): Promise<void> {
   text = await callTool({ action: "update", status: "completed" });
   assert(text.includes("Error"), "update without id returns error");
 
+  // update with nothing to change → error
   text = await callTool({ action: "update", id: 0 });
-  assert(text.includes("Error"), "update without status returns error");
+  assert(text.includes("Error"), "update with nothing to change returns error");
+
+  // ── update text-only and note-only (status optional) ───────────
+  console.log("\nupdate text/note only:");
+  await callTool({ action: "set", text: "Original primary" });
+  // note-only: no status needed
+  text = await callTool({ action: "update", id: 0, note: "just a note" });
+  assert(
+    targetManager.getState(sessionId).primary?.note === "just a note",
+    "update note-only without status",
+  );
+  // text-only: updates the text, keeps status
+  const beforeStatus = targetManager.getState(sessionId).primary?.status;
+  text = await callTool({ action: "update", id: 0, text: "Updated primary" });
+  assert(
+    targetManager.getState(sessionId).primary?.text === "Updated primary",
+    "update text-only changes text",
+  );
+  assert(
+    targetManager.getState(sessionId).primary?.status === beforeStatus,
+    "update text-only preserves status",
+  );
+  // secondary text-only
+  await callTool({ action: "add", text: "Original secondary" });
+  text = await callTool({ action: "update", id: 1, text: "Updated secondary" });
+  assert(
+    targetManager.getState(sessionId).secondary[0]?.text === "Updated secondary",
+    "update text-only on secondary",
+  );
 
   // ── details check ─────────────────────────────────────────────────
   console.log("\ndetails:");

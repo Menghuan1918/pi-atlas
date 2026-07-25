@@ -142,7 +142,11 @@ class TargetManager {
   }
 
   /**
-   * Update the status of any target (primary or secondary).
+   * Update a target (primary or secondary).
+   *
+   * At least one of `status`, `text`, or `note` should be provided. `status`
+   * is optional so a caller can update just the text or note without forcing a
+   * (no-op) status change.
    *
    * When the primary (id 0) transitions to a terminal state (completed/failed),
    * auto-continue is turned off.
@@ -150,8 +154,9 @@ class TargetManager {
   async updateStatus(
     sessionId: string,
     id: number,
-    status: TargetStatus,
+    status: TargetStatus | undefined,
     note?: string,
+    text?: string,
   ): Promise<TargetResult> {
     const state = this.getState(sessionId);
 
@@ -160,7 +165,8 @@ class TargetManager {
         return { state, message: "No primary target to update." };
       }
       const prevStatus = state.primary.status;
-      state.primary.status = status;
+      if (status !== undefined) state.primary.status = status;
+      if (text !== undefined) state.primary.text = text;
       if (note !== undefined) state.primary.note = note;
 
       // Terminal states turn off auto-continue.
@@ -169,18 +175,21 @@ class TargetManager {
       }
 
       await this.persist(sessionId, state);
-      const verb =
-        status === "completed"
-          ? "completed"
-          : status === "failed"
-            ? "failed"
-            : `set to ${status}`;
+      const changed: string[] = [];
+      if (status !== undefined) {
+        const verb =
+          status === "completed" ? "completed"
+          : status === "failed" ? "failed"
+          : `set to ${status}`;
+        changed.push(
+          verb + (prevStatus === status ? " (already)" : ""),
+        );
+      }
+      if (text !== undefined) changed.push("text updated");
+      if (note) changed.push(note);
       return {
         state,
-        message:
-          `Primary target ${verb}` +
-          (prevStatus === status ? " (already)" : "") +
-          (note ? `: ${note}` : ""),
+        message: `Primary target ${changed.join("; ")}`,
       };
     }
 
@@ -189,13 +198,18 @@ class TargetManager {
     if (!item) {
       return { state, message: `No target with id ${id}.` };
     }
-    item.status = status;
+    if (status !== undefined) item.status = status;
+    if (text !== undefined) item.text = text;
     if (note !== undefined) item.note = note;
 
     await this.persist(sessionId, state);
+    const changed: string[] = [];
+    if (status !== undefined) changed.push(`set to ${status}`);
+    if (text !== undefined) changed.push("text updated");
+    if (note) changed.push(note);
     return {
       state,
-      message: `Target [#${id}] set to ${status}` + (note ? `: ${note}` : ""),
+      message: `Target [#${id}] ${changed.join("; ")}`,
     };
   }
 
@@ -206,10 +220,14 @@ class TargetManager {
    *   will NOT be overwritten — only the secondary targets are replaced.
    *   This is the "allow partial failure" behavior: the primary is silently
    *   skipped rather than causing an error.
-   * - When auto-continue is off, both primary and secondary are replaced.
+   * - When auto-continue is off and `primaryText` is provided, both primary
+   *   and secondary are replaced.
+   * - When `primaryText` is omitted/null, the existing primary is preserved
+   *   (only secondary targets are replaced). This prevents accidentally
+   *   wiping the primary goal when an agent only wants to update its todos.
    *
-   * @param primaryText  New primary target text. If omitted/null, the primary
-   *                     is cleared (only when auto-continue is off).
+   * @param primaryText  New primary target text. If omitted/null, the existing
+   *                     primary is preserved.
    * @param secondary    New secondary targets (id auto-assigned 1, 2, 3, …).
    */
   async replaceTargets(
@@ -220,14 +238,15 @@ class TargetManager {
     const state = this.getState(sessionId);
     const skipped: string[] = [];
 
-    // Primary: skip when auto-continue is active (locked by user).
+    // Primary: skip when auto-continue is active (locked by user), or when
+    // primaryText is omitted (preserve existing primary — only update secondary).
     if (state.autoContinue) {
       skipped.push("primary (locked by user)");
-    } else {
-      state.primary = primaryText
-        ? { id: PRIMARY_ID, text: primaryText, status: "active" }
-        : null;
+    } else if (primaryText) {
+      state.primary = { id: PRIMARY_ID, text: primaryText, status: "active" };
     }
+    // If primaryText is null/undefined and auto-continue is off, the existing
+    // primary is preserved (not cleared).
 
     // Secondary: always fully replaced.
     state.secondary = secondary.map((item, i) => ({
