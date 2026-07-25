@@ -249,6 +249,7 @@ export class PiAcpBridge {
           () => {
             // Resolved without a turn (e.g. a slash-command prompt that an extension
             // handled and returned early): bookend the user_message with idle.
+            handle.pendingUserMessageId = null;
             if (!handle.turnRan) this.notify(sessionId, { sessionUpdate: "state_update", state: "idle" });
           },
           (err) => {
@@ -285,7 +286,12 @@ export class PiAcpBridge {
   }
 
   private async createSession(cwd: string, sessionManager: SessionManager): Promise<SessionHandle> {
-    const loader = new DefaultResourceLoader({ cwd, agentDir: this.agentDir, eventBus: this.eventBus, extensionFactories: this.extensionFactories });
+    const loader = new DefaultResourceLoader({
+      cwd,
+      agentDir: this.agentDir,
+      eventBus: this.eventBus,
+      extensionFactories: this.extensionFactories,
+    });
     await loader.reload();
     const opts: CreateAgentSessionOptions = {
       cwd,
