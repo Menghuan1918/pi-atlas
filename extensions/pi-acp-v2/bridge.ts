@@ -47,6 +47,8 @@ import {
   ADAPTER_NAME,
   ADAPTER_TITLE,
   ADAPTER_VERSION,
+  VENDOR_CAPABILITIES,
+  clientDeclares,
   readClientMeta,
 } from "./types.js";
 import { createAskUserUiContext } from "./ask-user-ui.js";
@@ -292,6 +294,119 @@ export class PiAcpBridge {
     // Mark in-progress tool calls cancelled (Spec §4.6).
     for (const u of handle.mapper.cancelInProgressToolCalls()) this.notify(sessionId, u);
     await handle.session.abort();
+  }
+
+  // ---- A4: _fork_from / _rewind_to ----------------------------------------
+
+  /**
+   * `_fork_from({sessionId, fromMessageId})` — fork a NEW independent session
+   * whose history is the original session up to (but not including) the user
+   * message `fromMessageId`. Non-destructive: the original session is untouched.
+   *
+   * pi's `runtime.fork()` is single-session and TEARS DOWN its current session —
+   * incompatible with ACP's many live sessions. Forking on a throwaway runtime
+   * still requires building a "dummy" session around the copy, and that dummy
+   * shares the original's session id (SessionManager.open preserves the header
+   * id), so its tear-down `session_shutdown` would clear the original's in-memory
+   * target state via the target singleton. So instead we call pi's fork PRIMITIVE
+   * directly — `SessionManager.createBranchedSession(anchor)`, the exact call
+   * `runtime.fork()` makes internally — on an independent `SessionManager.open`
+   * copy of the original file, then build + attach a fresh session via A1's
+   * `createSession` (→ `attachSession`). No dummy session ⇒ no `session_shutdown`
+   * ⇒ no cross-session state leak; createAgentSession runs on the already-branched
+   * new file, never the original.
+   *
+   * The anchor (entry immediately before M = M's parent) comes from A1's
+   * `resolveAnchorBefore`; `null` means M is the first user message → fork to an
+   * empty session (mirrors runtime.fork's root case). No extension handles
+   * `session_before_fork`, so fork never cancels (runtime.fork's `cancelled` is
+   * always false) — the -32000-cancelled path is unreachable for fork; navigateTree's
+   * `cancelled` IS preserved for `_rewind_to`.
+   */
+  async forkFrom(sessionId: string, fromMessageId: string): Promise<{ sessionId: string }> {
+    const handle = this.getHandle(sessionId); // -32602 unknown session
+    this.requireCapability(VENDOR_CAPABILITIES.forkFrom); // -32601
+    if (handle.session.isStreaming || handle.turnInProgress) {
+      throw new RequestError(-32000, "session busy");
+    }
+    this.resolveUserEntry(handle, fromMessageId); // -32602 unknown/off-branch/non-user messageId
+
+    // fork needs a persisted, saved session file (createBranchedSession reads it).
+    const origFile = handle.sessionManager.getSessionFile();
+    if (!origFile || !existsSync(origFile)) {
+      throw new RequestError(-32602, "session has no saved history to fork");
+    }
+    const sessionDir = handle.sessionManager.getSessionDir();
+
+    // Independent in-memory copy of the original session file (createBranchedSession
+    // mutates THIS, never the original handle's sessionManager → original untouched).
+    const copy = SessionManager.open(origFile, sessionDir);
+
+    // Anchor = the entry immediately before M (M's parent). null ⇒ M is the first
+    // user message → fork to an empty session (mirrors runtime.fork's root case).
+    const anchor = this.resolveAnchorBefore(sessionId, fromMessageId);
+    if (anchor === null) {
+      copy.newSession({ parentSession: origFile });
+    } else {
+      copy.createBranchedSession(anchor);
+    }
+    // copy is now the branched session (root→anchor); build + attach a fresh,
+    // shared-eventBus session around it (re-bind + re-subscribe via attachSession).
+    const newHandle = await this.createSession(handle.cwd, copy);
+    return { sessionId: newHandle.sessionId };
+  }
+
+  /**
+   * `_rewind_to({sessionId, toMessageId})` — IN PLACE move the session leaf to
+   * the state immediately before the user message `toMessageId`. Subsequent
+   * prompts continue from that anchor; the skipped entries (`toMessageId` and
+   * after) remain reachable as a dormant branch (pi tree model, not deleted).
+   *
+   * `session.navigateTree(entryId)` moves the leaf to a user message's PARENT
+   * (the anchor), handling the root case (parentId null) via resetLeaf — so we
+   * pass the user-message entryId and let navigateTree compute the anchor.
+   * Returns `{cancelled, ...}`; `cancelled` → -32000 (leaf unchanged).
+   */
+  async rewindTo(sessionId: string, toMessageId: string): Promise<Record<string, never>> {
+    const handle = this.getHandle(sessionId); // -32602 unknown session
+    this.requireCapability(VENDOR_CAPABILITIES.rewindTo); // -32601
+    if (handle.session.isStreaming || handle.turnInProgress) {
+      throw new RequestError(-32000, "session busy");
+    }
+    const entryId = this.resolveUserEntry(handle, toMessageId); // -32602
+    const result = await handle.session.navigateTree(entryId);
+    if (result.cancelled) {
+      throw new RequestError(-32000, "rewind cancelled — leaf unchanged");
+    }
+    return {};
+  }
+
+  /** Throw -32601 unless the client declared `key` in `capabilities._meta`. */
+  private requireCapability(key: string): void {
+    if (!clientDeclares(this.clientMeta, key)) {
+      throw new RequestError(-32601, `client did not declare capability: ${key}`);
+    }
+  }
+
+  /**
+   * Resolve a user-message messageId → its pi entryId, validating it is known,
+   * on the session's active branch, AND a user message. Throws -32602 otherwise.
+   * (pi's fork / navigateTree compute the "before" anchor from this entry's parent.)
+   */
+  private resolveUserEntry(handle: SessionHandle, messageId: string): string {
+    const entryId = handle.messageMap.getEntryId(messageId);
+    if (entryId === undefined) {
+      throw new RequestError(-32602, `unknown messageId: ${messageId}`);
+    }
+    const branch = handle.sessionManager.getBranch();
+    const entry = branch.find((e) => e.id === entryId);
+    if (!entry) {
+      throw new RequestError(-32602, `messageId not in active branch: ${messageId}`);
+    }
+    if (entry.type !== "message" || entry.message.role !== "user") {
+      throw new RequestError(-32602, `messageId does not refer to a user message: ${messageId}`);
+    }
+    return entryId;
   }
 
   // ---- internals ----------------------------------------------------------

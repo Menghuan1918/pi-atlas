@@ -37,7 +37,7 @@ import {
   type FakeScript,
 } from "../extensions/pi-acp-v2/fake-model.js";
 import { askUserExcludeToolsResolver, clientDeclares, VENDOR_CAPABILITIES } from "../extensions/pi-acp-v2/types.js";
-import targetExtension from "../extensions/target/index.js";
+import targetExtension, { targetManager } from "../extensions/target/index.js";
 import askUserExtension from "../extensions/askuser/index.js";
 
 let pass = 0;
@@ -845,6 +845,337 @@ async function testNoPlanWhenNeverHadTarget(): Promise<void> {
   }
 }
 
+// ---- A4: _fork_from / _rewind_to -------------------------------------------
+
+/** Capabilities declaring both A4 vendor methods (clients that opt in). */
+const FORK_REWIND_CAPS = { _meta: { _fork_from: {}, _rewind_to: {} } };
+
+/** user_message messageIds in emission order. */
+function userMessageIds(updates: UpdateNotification[]): string[] {
+  return updates
+    .filter((u) => u.update.sessionUpdate === "user_message")
+    .map((u) => (u.update as { messageId: string }).messageId);
+}
+
+/** Text of a message entry (string or content-array). */
+function entryText(entry: { message: { content: unknown } }): string {
+  const c = entry.message.content;
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) {
+    return c
+      .filter((p): p is { type: "text"; text: string } => typeof p === "object" && p?.type === "text")
+      .map((p) => p.text)
+      .join("");
+  }
+  return "";
+}
+
+/** Readable kind labels for a branch (e.g. "message:user", "model_change"). */
+function branchKinds(handle: { sessionManager: { getBranch: () => Array<{ type: string; message?: { role: string } }> } }): string[] {
+  return handle.sessionManager.getBranch().map((e) => (e.type === "message" && e.message ? `${e.type}:${e.message.role}` : e.type));
+}
+
+/** user messages (entries) on a branch, in order. */
+function userEntries(handle: NonNullable<ReturnType<PiAcpBridge["getSessionHandle"]>>): Array<{ id: string; message: { content: unknown } }> {
+  return handle.sessionManager
+    .getBranch()
+    .filter((e) => e.type === "message" && e.message.role === "user")
+    .map((e) => e as unknown as { id: string; message: { content: unknown } });
+}
+
+async function testForkFrom(): Promise<void> {
+  console.log("_fork_from: non-destructive fork, new session history = up-to-before-M");
+  let n = 0;
+  const { bridge, app, clientApp, updates } = harness({ idFactory: () => `m${n++}` });
+  await withClient(app, clientApp, async (c) => {
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: FORK_REWIND_CAPS });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitForIdle(updates);
+    updates.length = 0;
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "second" }] });
+    await waitForIdle(updates);
+    const [u2] = userMessageIds(updates);
+
+    const hA = bridge.getSessionHandle(sessionId)!;
+    const leafBefore = hA.sessionManager.getLeafId();
+    const branchLenBefore = hA.sessionManager.getBranch().length;
+
+    const res = await req(c, "_fork_from", { sessionId, fromMessageId: u2 });
+    const newId = res.sessionId;
+    check(typeof newId === "string" && newId !== sessionId, "fork returns a new sessionId (≠ original)");
+
+    const hB = bridge.getSessionHandle(newId)!;
+    const bUsers = userEntries(hB);
+    check(bUsers.length === 1, `forked session has exactly 1 user message (got ${bUsers.length})`);
+    check(bUsers[0] && entryText(bUsers[0]) === "first", "forked user message is 'first' (up to before M)");
+    const bKinds = branchKinds(hB);
+    check(!bKinds.includes("message:assistant") || bKinds.filter((k) => k === "message:assistant").length === 1, "forked session ends at the turn-1 assistant (M excluded)");
+
+    // Non-destructive: original session content + leaf unchanged.
+    check(hA.sessionManager.getLeafId() === leafBefore, "original leaf unchanged (non-destructive)");
+    check(hA.sessionManager.getBranch().length === branchLenBefore, "original branch length unchanged");
+    const aUsers = userEntries(hA);
+    check(aUsers.length === 2 && aUsers.some((u) => entryText(u) === "second"), "original still contains user2 ('second')");
+
+    // New session can run an independent prompt.
+    updates.length = 0;
+    await req(c, acp.methods.agent.session.prompt, { sessionId: newId, prompt: [{ type: "text", text: "forked-continuation" }] });
+    check(await waitForIdle(updates, 6000), "forked session runs an independent prompt (settles idle)");
+  });
+}
+
+async function testForkFromFirstMessage(): Promise<void> {
+  console.log("_fork_from: fork from the FIRST user message → empty history");
+  let n = 0;
+  const { bridge, app, clientApp, updates } = harness({ idFactory: () => `m${n++}` });
+  await withClient(app, clientApp, async (c) => {
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: FORK_REWIND_CAPS });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitForIdle(updates);
+    const [u1] = userMessageIds(updates);
+
+    const res = await req(c, "_fork_from", { sessionId, fromMessageId: u1 });
+    const newId = res.sessionId;
+    const hB = bridge.getSessionHandle(newId)!;
+    // Forking from the first user message yields a session with no user/assistant messages.
+    check(userEntries(hB).length === 0, "forked-from-first session has no user messages (empty history)");
+    // It can still run a fresh prompt.
+    updates.length = 0;
+    await req(c, acp.methods.agent.session.prompt, { sessionId: newId, prompt: [{ type: "text", text: "fresh" }] });
+    check(await waitForIdle(updates, 6000), "empty fork runs a fresh prompt");
+  });
+}
+
+async function testRewindTo(): Promise<void> {
+  console.log("_rewind_to: leaf moves before M, dormant branch preserved, context is pre-M");
+  let n = 0;
+  const { bridge, app, clientApp, updates } = harness({ idFactory: () => `m${n++}` });
+  await withClient(app, clientApp, async (c) => {
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: FORK_REWIND_CAPS });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitForIdle(updates);
+    updates.length = 0;
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "second" }] });
+    await waitForIdle(updates);
+    // After clearing, the only user_message in `updates` is the 2nd turn's.
+    const [u2] = userMessageIds(updates);
+
+    const hA = bridge.getSessionHandle(sessionId)!;
+    const entriesBefore = hA.sessionManager.getEntries().length;
+
+    const res = await req(c, "_rewind_to", { sessionId, toMessageId: u2 });
+    check(JSON.stringify(res) === "{}", "rewind returns {}");
+
+    // Leaf moved to the anchor (turn-1 assistant); user2/assistant2 off the active branch.
+    const activeUsers = userEntries(hA);
+    check(activeUsers.length === 1 && entryText(activeUsers[0]) === "first", "active branch has only user1 after rewind");
+    check(!userEntries(hA).some((u) => entryText(u) === "second"), "user2 is off the active branch");
+
+    // Dormant branch preserved: the whole tree still contains user2/assistant2 (not deleted).
+    const allEntries = hA.sessionManager.getEntries();
+    check(allEntries.length === entriesBefore, `dormant entries preserved (tree still has ${allEntries.length} entries)`);
+    const allUserTexts = allEntries
+      .filter((e) => e.type === "message" && e.message.role === "user")
+      .map((e) => entryText(e as { message: { content: unknown } }));
+    check(allUserTexts.includes("second"), "user2 still reachable in the tree (dormant branch)");
+
+    // Context is pre-M: buildContextEntries excludes user2/assistant2.
+    const ctxUsers = hA.sessionManager
+      .buildContextEntries()
+      .filter((e) => e.type === "message" && e.message.role === "user");
+    check(ctxUsers.length === 1 && entryText(ctxUsers[0] as { message: { content: unknown } }) === "first", "LLM context is pre-M (only user1)");
+
+    // Subsequent prompt continues from the anchor.
+    updates.length = 0;
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "continue" }] });
+    check(await waitForIdle(updates, 6000), "prompt after rewind continues from the anchor (settles idle)");
+  });
+}
+
+async function testRewindToFirstMessage(): Promise<void> {
+  console.log("_rewind_to: rewind to the FIRST user message → empty context");
+  let n = 0;
+  const { bridge, app, clientApp, updates } = harness({ idFactory: () => `m${n++}` });
+  await withClient(app, clientApp, async (c) => {
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: FORK_REWIND_CAPS });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitForIdle(updates);
+    const [u1] = userMessageIds(updates);
+
+    const hA = bridge.getSessionHandle(sessionId)!;
+    const entriesBefore = hA.sessionManager.getEntries().length;
+    await req(c, "_rewind_to", { sessionId, toMessageId: u1 });
+    // Rewinding to the first user message empties the active context (no user/assistant).
+    const ctxUsers = hA.sessionManager.buildContextEntries().filter((e) => e.type === "message" && e.message.role === "user");
+    check(ctxUsers.length === 0, "context has no user messages after rewind-to-first");
+    // Dormant branch still preserved.
+    check(hA.sessionManager.getEntries().length === entriesBefore, "dormant entries preserved after rewind-to-first");
+  });
+}
+
+async function testForkRewindCapabilityGating(): Promise<void> {
+  console.log("_fork_from/_rewind_to: undeclared capability → -32601, no side effects");
+  let n = 0;
+  const { bridge, app, clientApp, updates } = harness({ idFactory: () => `m${n++}` });
+  await withClient(app, clientApp, async (c) => {
+    // Client declares NEITHER _fork_from nor _rewind_to.
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitForIdle(updates);
+    const [u1] = userMessageIds(updates);
+    updates.length = 0;
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "second" }] });
+    await waitForIdle(updates);
+    const [u2] = userMessageIds(updates);
+
+    const hA = bridge.getSessionHandle(sessionId)!;
+    const leafBefore = hA.sessionManager.getLeafId();
+    const sessionsBefore = bridge["sessions"].size;
+
+    let forkCode: number | undefined;
+    try {
+      await req(c, "_fork_from", { sessionId, fromMessageId: u2 });
+    } catch (e) {
+      if (isErr(e)) forkCode = e.code;
+    }
+    check(forkCode === -32601, `_fork_from undeclared → -32601 (got ${forkCode})`);
+
+    let rewindCode: number | undefined;
+    try {
+      await req(c, "_rewind_to", { sessionId, toMessageId: u1 });
+    } catch (e) {
+      if (isErr(e)) rewindCode = e.code;
+    }
+    check(rewindCode === -32601, `_rewind_to undeclared → -32601 (got ${rewindCode})`);
+
+    // No side effects: no new session registered, leaf unchanged.
+    check(bridge["sessions"].size === sessionsBefore, "no new session created when capability undeclared");
+    check(hA.sessionManager.getLeafId() === leafBefore, "leaf unchanged when capability undeclared");
+  });
+}
+
+async function testForkRewindUnknownMessageId(): Promise<void> {
+  console.log("_fork_from/_rewind_to: unknown / non-user messageId → -32602");
+  const { app, clientApp, updates } = harness({});
+  await withClient(app, clientApp, async (c) => {
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: FORK_REWIND_CAPS });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitForIdle(updates);
+    // An assistant message's messageId is known+on-branch but NOT a user message.
+    const assistantMsg = updates.find((u) => u.update.sessionUpdate === "agent_message");
+    const assistantId = (assistantMsg?.update as { messageId?: string })?.messageId;
+
+    let forkCode: number | undefined;
+    try {
+      await req(c, "_fork_from", { sessionId, fromMessageId: "no-such-message" });
+    } catch (e) {
+      if (isErr(e)) forkCode = e.code;
+    }
+    check(forkCode === -32602, `_fork_from unknown messageId → -32602 (got ${forkCode})`);
+
+    let rewindCode: number | undefined;
+    try {
+      await req(c, "_rewind_to", { sessionId, toMessageId: "no-such-message" });
+    } catch (e) {
+      if (isErr(e)) rewindCode = e.code;
+    }
+    check(rewindCode === -32602, `_rewind_to unknown messageId → -32602 (got ${rewindCode})`);
+
+    // A known assistant messageId is not a valid fork/rewind anchor (not a user message).
+    if (assistantId) {
+      let forkAssistantCode: number | undefined;
+      try {
+        await req(c, "_fork_from", { sessionId, fromMessageId: assistantId });
+      } catch (e) {
+        if (isErr(e)) forkAssistantCode = e.code;
+      }
+      check(forkAssistantCode === -32602, `_fork_from assistant messageId → -32602 (got ${forkAssistantCode})`);
+
+      let rewindAssistantCode: number | undefined;
+      try {
+        await req(c, "_rewind_to", { sessionId, toMessageId: assistantId });
+      } catch (e) {
+        if (isErr(e)) rewindAssistantCode = e.code;
+      }
+      check(rewindAssistantCode === -32602, `_rewind_to assistant messageId → -32602 (got ${rewindAssistantCode})`);
+    }
+  });
+}
+
+async function testForkRewindBusy(): Promise<void> {
+  console.log("_fork_from/_rewind_to: busy session → -32000 (no auto-abort)");
+  const script: FakeScript = () => hangingTurnEvents("working");
+  const { bridge, app, clientApp, updates } = harness({ script });
+  await withClient(app, clientApp, async (c) => {
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: FORK_REWIND_CAPS });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "go" }] });
+    // wait until the turn is running
+    const runningDeadline = Date.now() + 2000;
+    while (Date.now() < runningDeadline && !updates.some((u) => (u.update as { state?: string }).state === "running")) await sleep(5);
+    const hA = bridge.getSessionHandle(sessionId)!;
+    check(hA.session.isStreaming || hA.turnInProgress, "turn is in progress before fork/rewind");
+
+    let forkCode: number | undefined;
+    try {
+      await req(c, "_fork_from", { sessionId, fromMessageId: "whatever" });
+    } catch (e) {
+      if (isErr(e)) forkCode = e.code;
+    }
+    check(forkCode === -32000, `_fork_from on busy session → -32000 (got ${forkCode})`);
+
+    let rewindCode: number | undefined;
+    try {
+      await req(c, "_rewind_to", { sessionId, toMessageId: "whatever" });
+    } catch (e) {
+      if (isErr(e)) rewindCode = e.code;
+    }
+    check(rewindCode === -32000, `_rewind_to on busy session → -32000 (got ${rewindCode})`);
+
+    // The turn is still running (not auto-aborted) — cancel to settle.
+    await c.notify(acp.methods.agent.session.cancel, { sessionId });
+    await waitForIdle(updates);
+  });
+}
+
+async function testForkDoesNotWipeOriginalTargetState(): Promise<void> {
+  console.log("_fork_from: does not wipe the original session's in-memory target state");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  // turn 0: Target.add → sets an in-memory target state on the original session.
+  const script = targetScript([{ action: "add", args: { text: "task A" } }]);
+  const { app, clientApp, updates } = harness({ script, extensionFactories: [targetExtension], agentDir: atlasDir });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: FORK_REWIND_CAPS });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "add target" }] });
+      await waitForIdle(updates, 8000);
+      check(planNotifications(updates).planUpdates.length >= 1, "original received a plan_update (target set)");
+      const origState = targetManager.getState(sessionId);
+      check(origState.secondary.length === 1 && origState.secondary[0]?.text === "task A", "original holds the target state before fork");
+
+      // Fork from the (only) user message. A throwaway dummy sharing the original's
+      // session id would, on tear-down, fire session_shutdown → clearSession(originalId).
+      const [u1] = userMessageIds(updates);
+      const { sessionId: newId } = await req(c, "_fork_from", { sessionId, fromMessageId: u1 });
+      check(newId !== sessionId, "fork produced a new session");
+
+      // The original's in-memory target state MUST survive the fork.
+      const afterState = targetManager.getState(sessionId);
+      check(afterState.secondary.length === 1 && afterState.secondary[0]?.text === "task A", "original target state survives _fork_from (no session_shutdown leak)");
+    });
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
 async function main(): Promise<void> {
   await testInitializeAndCapabilities();
   await testPromptStreaming();
@@ -856,6 +1187,14 @@ async function main(): Promise<void> {
   await testAskUserCapabilityNoCrash();
   await testMessageIdEntryMapping();
   await testSlashCommandNoDeadlock();
+  await testForkFrom();
+  await testForkFromFirstMessage();
+  await testRewindTo();
+  await testRewindToFirstMessage();
+  await testForkRewindCapabilityGating();
+  await testForkRewindUnknownMessageId();
+  await testForkRewindBusy();
+  await testForkDoesNotWipeOriginalTargetState();
   await testPlanTargetToolPath();
   await testPlanGoalCommandPath();
   await testPlanDedup();

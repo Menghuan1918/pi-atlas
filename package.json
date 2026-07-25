@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/test-smoke.ts && tsx scripts/test-guard-abort.ts && tsx scripts/test-target.ts && tsx verify/config.test.ts && tsx verify/askuser.test.ts && tsx verify/agent-task.test.ts && tsx verify/bash-timeout.test.ts && tsx verify/target.test.ts && tsx verify/format-output.test.ts && tsx verify/pi-acp-v2-mapping.test.ts && tsx verify/pi-acp-v2-message-map.test.ts && tsx verify/pi-acp-v2-plan.test.ts && tsx verify/pi-acp-v2-ask-user.test.ts && tsx scripts/test-pi-acp-v2.ts"
+    "test": "tsx scripts/test-smoke.ts && tsx scripts/test-guard-abort.ts && tsx scripts/test-target.ts && tsx verify/config.test.ts && tsx verify/askuser.test.ts && tsx verify/agent-task.test.ts && tsx verify/bash-timeout.test.ts && tsx verify/target.test.ts && tsx verify/format-output.test.ts && tsx verify/pi-acp-v2-mapping.test.ts && tsx verify/pi-acp-v2-message-map.test.ts && tsx verify/pi-acp-v2-plan.test.ts && tsx verify/pi-acp-v2-ask-user.test.ts && tsx verify/pi-acp-v2-fork-rewind.test.ts && tsx scripts/test-pi-acp-v2.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",
