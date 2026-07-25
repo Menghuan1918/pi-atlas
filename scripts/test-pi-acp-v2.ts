@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as acp from "@agentclientprotocol/sdk/experimental/v2";
 import type { AgentContext, SessionUpdate } from "@agentclientprotocol/sdk/experimental/v2";
+import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 
 import { PiAcpBridge } from "../extensions/pi-acp-v2/bridge.js";
 import { createAgentApp } from "../extensions/pi-acp-v2/agent-app.js";
@@ -52,12 +53,13 @@ function sleep(ms: number): Promise<void> {
 type UpdateNotification = { sessionId: string; update: SessionUpdate };
 
 /** In-process ACP harness: bridge + apps + collected session/update notifications. */
-function harness(opts: { script?: FakeScript; clientMeta?: Record<string, unknown>; idFactory?: () => string }) {
+function harness(opts: { script?: FakeScript; clientMeta?: Record<string, unknown>; idFactory?: () => string; extensionFactories?: InlineExtension[] }) {
   const updates: UpdateNotification[] = [];
   const bridge = new PiAcpBridge({
     model: FAKE_MODEL,
     modelRuntime: createFakeModelRuntime(opts.script ?? DEFAULT_FAKE_SCRIPT),
     idFactory: opts.idFactory,
+    extensionFactories: opts.extensionFactories,
   });
   const app = createAgentApp(bridge);
   const clientApp = acp
@@ -205,8 +207,9 @@ async function testToolUseTurn(): Promise<void> {
       check(toolUpdates.length >= 2, `received >=2 tool_call_update (got ${toolUpdates.length})`);
       const withContent = toolUpdates.find((u) => (u.update as { content?: unknown[] }).content);
       check(!!withContent, "a tool_call_update carries content");
-      const c0 = (withContent!.update as { content?: Array<{ type: string; content?: { type: string } }> }).content?.[0];
+      const c0 = (withContent!.update as { content?: Array<{ type: string; content?: { type: string; text?: string } }> }).content?.[0];
       check(c0?.type === "content" && c0?.content?.type === "text", "tool content is ToolCallContent{type:content,content{text}}");
+      check(c0?.content?.text === "file-contents", "tool content text is the read result");
 
       // Two distinct assistant messageIds (turn 0 tool-use msg + turn 1 text msg), both mapped.
       const ids = new Set(
@@ -225,6 +228,30 @@ async function testToolUseTurn(): Promise<void> {
   } finally {
     rmSync(tmpFile, { force: true });
   }
+}
+
+async function testSlashCommandNoDeadlock(): Promise<void> {
+  console.log("slash-command prompt does not deadlock the session");
+  // A /noop command resolves prompt() without running a turn (no agent_settled).
+  // turnInProgress must be cleared on settle, or the next prompt returns -32000.
+  const noopExtension: InlineExtension = (pi) => {
+    pi.registerCommand("noop", { handler: async () => {} });
+  };
+  const { bridge, app, clientApp, updates } = harness({ extensionFactories: [noopExtension] });
+  await withClient(app, clientApp, async (c) => {
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "/noop" }] });
+    await sleep(50);
+    check(updates.some((u) => (u.update as { state?: string }).state === "idle"), "slash-command (no turn) bookended with idle");
+    const handle = bridge.getSessionHandle(sessionId);
+    check(!!handle && !handle.turnInProgress, "turnInProgress cleared after no-turn prompt");
+    // Next prompt must succeed (not -32000) and run a real turn — proves no deadlock.
+    updates.length = 0;
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hi" }] });
+    const ok = await waitForIdle(updates);
+    check(ok, "next prompt runs a turn after slash-command (no deadlock)");
+  });
 }
 
 async function testListAndResume(): Promise<void> {
@@ -469,6 +496,7 @@ async function main(): Promise<void> {
   await testCloseAndErrors();
   await testAskUserCapabilityNoCrash();
   await testMessageIdEntryMapping();
+  await testSlashCommandNoDeadlock();
   await testSubprocessFramingAndEof();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

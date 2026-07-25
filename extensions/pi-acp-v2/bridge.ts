@@ -21,6 +21,7 @@ import {
   type AgentSessionEvent,
   type CreateAgentSessionOptions,
   type ExtensionUIContext,
+  type InlineExtension,
   type ModelRuntime,
   type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
@@ -55,6 +56,8 @@ export interface SessionHandle {
   pendingUserMessageId: string | null;
   /** Adapter-level busy flag (set synchronously in prompt(); cleared on settle). */
   turnInProgress: boolean;
+  /** True once a real turn started (agent_start); distinguishes no-turn resolves (slash commands). */
+  turnRan: boolean;
 }
 
 export interface BridgeOptions {
@@ -68,6 +71,8 @@ export interface BridgeOptions {
   excludeToolsResolver?: (clientMeta: unknown) => string[];
   /** UI context for extensions in rpc mode. A3 replaces with the _ask_user bridge. */
   uiContext?: ExtensionUIContext;
+  /** Inline extension factories to load (e.g. test commands). */
+  extensionFactories?: InlineExtension[];
   /** Deterministic messageId factory for tests. */
   idFactory?: () => string;
 }
@@ -122,6 +127,7 @@ export class PiAcpBridge {
   private readonly modelRuntime?: ModelRuntime;
   private readonly excludeToolsResolver: (clientMeta: unknown) => string[];
   private readonly uiContext?: ExtensionUIContext;
+  private readonly extensionFactories?: InlineExtension[];
   private readonly idFactory: () => string;
 
   /** Client context for sending notifications (captured on connect). */
@@ -135,6 +141,7 @@ export class PiAcpBridge {
     this.modelRuntime = options.modelRuntime;
     this.excludeToolsResolver = options.excludeToolsResolver ?? (() => []);
     this.uiContext = options.uiContext;
+    this.extensionFactories = options.extensionFactories;
     this.idFactory = options.idFactory ?? defaultIdFactory;
   }
 
@@ -222,6 +229,7 @@ export class PiAcpBridge {
     const userMessageId = this.idFactory();
     handle.pendingUserMessageId = userMessageId;
     handle.mapper.reset();
+    handle.turnRan = false;
     const text = contentBlocksToText(promptBlocks);
     // Defer to a macrotask so the prompt RESPONSE is written before any update.
     // (A microtask is insufficient: the SDK's responder.respond() is itself awaited
@@ -235,12 +243,27 @@ export class PiAcpBridge {
         return;
       }
       this.notify(sessionId, { sessionUpdate: "user_message", messageId: userMessageId, content: promptBlocks });
-      void handle.session.prompt(text).catch((err) => {
-        handle.turnInProgress = false;
-        handle.pendingUserMessageId = null;
-        this.notify(sessionId, { sessionUpdate: "state_update", state: "idle", stopReason: "refusal" });
-        this.logError("prompt error", err);
-      });
+      void handle.session
+        .prompt(text)
+        .then(
+          () => {
+            // Resolved without a turn (e.g. a slash-command prompt that an extension
+            // handled and returned early): bookend the user_message with idle.
+            if (!handle.turnRan) this.notify(sessionId, { sessionUpdate: "state_update", state: "idle" });
+          },
+          (err) => {
+            // Only emit idle(refusal) if no turn ran (pre-turn error like missing auth);
+            // a turn that ran already emitted idle via agent_settled.
+            if (!handle.turnRan) {
+              this.notify(sessionId, { sessionUpdate: "state_update", state: "idle", stopReason: "refusal" });
+            }
+            handle.pendingUserMessageId = null;
+            this.logError("prompt error", err);
+          },
+        )
+        .finally(() => {
+          handle.turnInProgress = false;
+        });
     }, 0);
     return {};
   }
@@ -262,7 +285,7 @@ export class PiAcpBridge {
   }
 
   private async createSession(cwd: string, sessionManager: SessionManager): Promise<SessionHandle> {
-    const loader = new DefaultResourceLoader({ cwd, agentDir: this.agentDir, eventBus: this.eventBus });
+    const loader = new DefaultResourceLoader({ cwd, agentDir: this.agentDir, eventBus: this.eventBus, extensionFactories: this.extensionFactories });
     await loader.reload();
     const opts: CreateAgentSessionOptions = {
       cwd,
@@ -294,6 +317,7 @@ export class PiAcpBridge {
       cwd,
       pendingUserMessageId: null,
       turnInProgress: false,
+      turnRan: false,
     };
     session.subscribe((ev) => this.onPiEvent(handle, ev));
     this.sessions.set(handle.sessionId, handle);
@@ -315,6 +339,7 @@ export class PiAcpBridge {
   private onPiEvent(handle: SessionHandle, event: AgentSessionEvent): void {
     const updates = handle.mapper.reduce(event);
     for (const u of updates) this.notify(handle.sessionId, u);
+    if (event.type === "agent_start") handle.turnRan = true;
     if (event.type === "agent_settled") handle.turnInProgress = false;
 
     // Record messageId ↔ entryId. pi emits message_end BEFORE persisting the entry
