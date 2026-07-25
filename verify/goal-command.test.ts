@@ -90,8 +90,20 @@ async function main(): Promise<void> {
   await goal("Refactor the auth module", createMockCtx(true));
   assert(sent.length === 1, "sends exactly one message when idle");
   assert(
-    sent[0]?.content === "Refactor the auth module",
-    "message content is the raw goal text",
+    sent[0]?.content !== "Refactor the auth module",
+    "message is wrapped, not the raw goal text",
+  );
+  assert(
+    sent[0]?.content.includes("Refactor the auth module"),
+    "wrapped message includes the goal text",
+  );
+  assert(
+    sent[0]?.content.includes('Target(action: "add"'),
+    "message nudges breaking the goal into sub-tasks",
+  );
+  assert(
+    /narrower|easier-to-test/.test(sent[0]?.content ?? ""),
+    "message includes fidelity / anti-narrowing guidance",
   );
   assert(
     sent[0]?.opts === undefined || sent[0]?.opts?.deliverAs === undefined,
@@ -128,8 +140,12 @@ async function main(): Promise<void> {
   await goal("on", createMockCtx(true));
   assert(sent.length === 1, "/goal on sends one message when idle");
   assert(
-    sent[0]?.content === "Write more tests",
-    "/goal on sends the existing primary text",
+    sent[0]?.content !== "Write more tests",
+    "/goal on message is wrapped, not the raw primary text",
+  );
+  assert(
+    sent[0]?.content.includes("Write more tests"),
+    "/goal on message includes the existing primary text",
   );
 
   // ── /goal on while streaming → no immediate send ──────────────────
