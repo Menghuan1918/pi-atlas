@@ -25,3 +25,6 @@ Thumbs.db
 
 # Internal dev docs (plans, notes, etc.)
 docs/
+
+# pi session logs (timestamp_uuid.jsonl — written to cwd by pi runtime/tests)
+/*.jsonl
