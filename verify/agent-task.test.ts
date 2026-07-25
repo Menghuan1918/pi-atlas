@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { TaskManager, taskManager } from "../extensions/task/index.js";
 import {
   extractFinalOutput,
+  extractLastAction,
   extractSessionIdFromPath,
   getPiInvocation,
   MAX_AGENT_DEPTH,
@@ -162,6 +163,58 @@ console.log("\nTest 1: extractFinalOutput");
   assert(extractFinalOutput(toolOnly) === "", "empty when assistant has no text part");
 
   assert(extractFinalOutput([]) === "", "empty for empty messages");
+}
+
+// ---------------------------------------------------------------------------
+// 1a. Unit tests: extractLastAction (AwaitTask live "last action")
+// ---------------------------------------------------------------------------
+
+console.log("\nTest 1a: extractLastAction");
+{
+  // Last assistant message is text → first non-empty line.
+  const textLast = [
+    { role: "user", content: [{ type: "text", text: "q" }] },
+    { role: "assistant", content: [{ type: "text", text: "Reading the file now" }] },
+  ];
+  assert(extractLastAction(textLast) === "Reading the file now", "text block → first non-empty line");
+
+  // Multi-line text → only the first non-empty line.
+  const multiline = [
+    { role: "assistant", content: [{ type: "text", text: "\n\n  Doing X\n  then Y" }] },
+  ];
+  assert(extractLastAction(multiline) === "Doing X", "multi-line text → first non-empty line only");
+
+  // Last content block is a toolCall → "→ name(args)".
+  const toolCallLast = [
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Let me look" },
+        { type: "toolCall", name: "read", arguments: { path: "/a/b.ts" } },
+      ],
+    },
+  ];
+  assert(extractLastAction(toolCallLast) === '→ read({"path":"/a/b.ts"})', "toolCall → → name(args)");
+
+  // toolCall with no arguments → "→ name()".
+  const noArgs = [{ role: "assistant", content: [{ type: "toolCall", name: "list", arguments: undefined }] }];
+  assert(extractLastAction(noArgs) === "→ list()", "toolCall no args → → name()");
+
+  // Picks the LAST assistant message (skips earlier ones + user/tool results).
+  const order = [
+    { role: "assistant", content: [{ type: "text", text: "earlier" }] },
+    { role: "user", content: [{ type: "text", text: "result" }] },
+    { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }] },
+  ];
+  assert(extractLastAction(order) === '→ bash({"command":"ls"})', "uses the last assistant message");
+
+  // No assistant messages → "".
+  assert(extractLastAction([{ role: "user", content: [{ type: "text", text: "x" }] }]) === "", "no assistant → empty");
+  assert(extractLastAction([]) === "", "empty messages → empty");
+
+  // Long text is capped.
+  const capped = extractLastAction([{ role: "assistant", content: [{ type: "text", text: "x".repeat(300) }] }]);
+  assert(capped.length === 200 && capped.endsWith("…"), "long text capped to 200 chars with ellipsis");
 }
 
 // ---------------------------------------------------------------------------

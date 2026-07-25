@@ -224,6 +224,53 @@ export function extractFinalOutput(messages: PiMessage[]): string {
 }
 
 /**
+ * Extract a one-line summary of the sub-agent's most recent action — the last
+ * content block of the last assistant message.
+ *
+ * - text block → the first non-empty line of the text (capped);
+ * - toolCall   → "→ name(compact args)";
+ * - nothing    → "".
+ *
+ * Unlike {@link extractFinalOutput} (which only returns text), this also
+ * surfaces tool calls — which is what a running agent is usually "doing".
+ * Used by AwaitTask's live status to show what a sub-agent is currently up to.
+ */
+export function extractLastAction(messages: PiMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    for (let j = msg.content.length - 1; j >= 0; j--) {
+      const part = msg.content[j];
+      if (part.type === "text" && part.text && part.text.trim()) {
+        return firstNonEmptyLine(part.text, 200);
+      }
+      if (part.type === "toolCall" && part.name) {
+        return `→ ${part.name}(${compactArgs(part.arguments)})`;
+      }
+    }
+  }
+  return "";
+}
+
+/** First non-empty line of `text`, capped to `max` visible characters. */
+function firstNonEmptyLine(text: string, max: number): string {
+  const line = text.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  return line.length > max ? line.slice(0, max - 1) + "…" : line;
+}
+
+/** Compact, single-line, length-capped representation of tool-call arguments. */
+function compactArgs(args: unknown): string {
+  if (args === undefined || args === null) return "";
+  let s: string;
+  try {
+    s = typeof args === "string" ? args : JSON.stringify(args);
+  } catch {
+    s = String(args);
+  }
+  return s.length > 120 ? s.slice(0, 119) + "…" : s;
+}
+
+/**
  * Extract a session ID (UUID) from a pi session file path.
  *
  * pi session files are named `<timestamp>_<uuid>.jsonl`, e.g.

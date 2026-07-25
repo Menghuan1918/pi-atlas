@@ -24,7 +24,7 @@ import type { Task, TaskResult, TaskStatus, TaskType, TaskUsage } from "./types.
 import { generateTaskId } from "./types.js";
 import { OutputAccumulator } from "./output-accumulator.js";
 import * as persistence from "./persistence.js";
-import { getPiInvocation, extractFinalOutput, formatAgentOutput } from "./agent-task.js";
+import { getPiInvocation, extractFinalOutput, extractLastAction, formatAgentOutput } from "./agent-task.js";
 
 /** Milliseconds to wait after SIGTERM before escalating to SIGKILL. */
 const KILL_GRACE_MS = 5000;
@@ -778,6 +778,21 @@ export class TaskManager {
   }
 
   // ---- watch ----
+
+  /**
+   * Return a one-line summary of a running agent task's most recent action —
+   * the last content block (text or tool call) of the last assistant message.
+   * Returns "" for non-agent tasks or when there is nothing to show yet.
+   *
+   * Used by AwaitTask's live status to show what a sub-agent is currently doing.
+   */
+  getLastAction(sessionId: string, taskId: string): string {
+    const task = this.getTask(sessionId, taskId);
+    if (!task || task.type !== "agent") return "";
+    const messages = this.agentMessages.get(taskId);
+    if (!messages || messages.length === 0) return "";
+    return extractLastAction(messages);
+  }
 
   /**
    * Return the current output snapshot for a task.

@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import askUserExtension from "../extensions/askuser/index";
 import { getAskUserConfigPath } from "../extensions/askuser/config";
+import { targetManager } from "../extensions/target/target-manager.js";
 
 let pass = 0;
 let fail = 0;
@@ -338,6 +339,52 @@ console.log("\n--- TUI multi-question (mode=tui) ---");
 	const r = await run({ questions: [{ question: "Pick", type: "select" }] }, ctx);
 	assert(r.isError === true, "TUI select no options → isError");
 	assert(r.content[0].text === "Question 'Pick' has type 'select' but no options provided", "TUI select no options message");
+}
+
+// ---------------------------------------------------------------------------
+// Goal-active timeout cap (auto-continue → askuser timeout capped at 60s)
+// ---------------------------------------------------------------------------
+console.log("\n--- Goal-active timeout cap ---");
+
+/** Run one input question; return the timeout option passed to ctx.ui.input. */
+async function inputTimeout(): Promise<unknown> {
+	const { ctx, rec } = makeSeqCtx({ input: ["x"] });
+	await run({ questions: [{ question: "q?", type: "input" }] }, ctx);
+	return rec.input[0].o2;
+}
+
+// 19. config 0 + auto-continue OFF → no timeout (infinite). Baseline.
+{
+	startSession();
+	setConfig(0);
+	await targetManager.goalOff(sessionId); // ensure off (no-op if already off)
+	assert(await inputTimeout() === undefined, "auto-continue off + config 0 → no timeout");
+}
+
+// 20. config 0 + auto-continue ON → capped to 60s.
+{
+	setConfig(0);
+	await targetManager.goalSet(sessionId, "do the thing");
+	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 60000 }), "auto-continue on + config 0 → 60s");
+}
+
+// 21. config 30 + auto-continue ON → stays 30s (cap only lowers).
+{
+	setConfig(30);
+	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 30000 }), "auto-continue on + config 30 → 30s (not raised)");
+}
+
+// 22. config 120 + auto-continue ON → capped to 60s.
+{
+	setConfig(120);
+	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 60000 }), "auto-continue on + config 120 → 60s (lowered)");
+}
+
+// 23. config 120 + auto-continue OFF → 120s (no cap when goal inactive).
+{
+	setConfig(120);
+	await targetManager.goalOff(sessionId);
+	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 120000 }), "auto-continue off + config 120 → 120s (no cap)");
 }
 
 console.log(`\naskuser.test: ${pass} passed, ${fail} failed`);

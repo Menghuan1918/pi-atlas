@@ -5,8 +5,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 
-import { TaskManager } from "../extensions/task/index.js";
+import { TaskManager, taskManager, awaitTaskTool } from "../extensions/task/index.js";
 
 let pass = 0;
 let fail = 0;
@@ -144,6 +145,50 @@ console.log("\nTest 6: Target list with progress summary");
   assert(formatted.includes("✓ [#1]"), "completed task has ✓");
   assert(formatted.includes("✗ [#2]"), "failed task has ✗");
   assert(formatted.includes("○ [#3]"), "active task has ○");
+}
+
+// ---------------------------------------------------------------------------
+// Test 7: AwaitTask live status shows bash output tail while waiting
+// ---------------------------------------------------------------------------
+console.log("\nTest 7: AwaitTask live status shows bash output tail");
+{
+  // Isolate atlas dir so task persistence doesn't touch ~/.pi/atlas.
+  const savedAtlas = process.env.PI_ATLAS_DIR;
+  const atlasTmp = mkdtempSync(join(tmpdir(), "pi-fmt-live-"));
+  process.env.PI_ATLAS_DIR = atlasTmp;
+
+  const liveSid = "live-tail-test";
+  taskManager.setSessionDepth(liveSid, 0);
+
+  // A bash task that emits lines over ~1.5s so the 1s live-status tick fires
+  // while it is still running.
+  const cmd = 'for i in 1 2 3 4 5; do echo "progress $i"; sleep 0.3; done';
+  const task = taskManager.createBashTask(liveSid, cmd, tempDir);
+
+  const captured: string[] = [];
+  const onUpdate: AgentToolUpdateCallback<unknown> = (u) => {
+    const t = u.content.find((c) => c.type === "text")?.text;
+    if (t) captured.push(t);
+  };
+
+  const result = (await awaitTaskTool.execute(
+    "tc1",
+    { taskIds: [task.id] },
+    undefined,
+    onUpdate,
+    { sessionManager: { getSessionId: () => liveSid }, cwd: tempDir } as never,
+  )) as { content: { type: string; text: string }[]; details: { results: { status: string; output: string }[] } };
+
+  assert(result.content[0].text.includes("progress 5"), "final result includes last output line");
+  assert(result.details.results[0].status === "completed", "task completed");
+
+  // At least one live update (emitted while the task was still running) showed
+  // the bash output tail — marked with “│” and containing a progress line.
+  const tailUpdates = captured.filter((t) => t.includes("│") && t.includes("progress"));
+  assert(tailUpdates.length > 0, "live status emitted a bash output tail while running");
+
+  process.env.PI_ATLAS_DIR = savedAtlas;
+  rmSync(atlasTmp, { recursive: true, force: true });
 }
 
 // Cleanup

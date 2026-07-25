@@ -24,6 +24,9 @@ const DEFAULT_AWAIT_TIMEOUT_S = 3600;
 /** Interval between live status updates during AwaitTask (ms). */
 const LIVE_UPDATE_INTERVAL_MS = 1000;
 
+/** Max lines of bash output (or agent last-action) shown per task in the live status. */
+const LIVE_TAIL_LINES = 5;
+
 // ---------------------------------------------------------------------------
 // AwaitTask
 // ---------------------------------------------------------------------------
@@ -95,21 +98,52 @@ function taskToResult(task: Task): TaskResult {
   };
 }
 
+/** Take the last `n` lines of `text` (right-trimmed). */
+function tailLines(text: string, n: number): string {
+  const lines = text.split("\n");
+  return lines.slice(Math.max(0, lines.length - n)).join("\n").trimEnd();
+}
+
+/**
+ * Live "last activity" for a running task, for the AwaitTask status display.
+ *  - bash: the last few lines of current stdout/stderr.
+ *  - agent: a one-line summary of the sub-agent's most recent action.
+ * Returns "" when there is nothing to show.
+ */
+function liveTail(sessionId: string, task: Task): string {
+  if (task.type === "agent") {
+    return taskManager.getLastAction(sessionId, task.id);
+  }
+  const watch = taskManager.watchTask(sessionId, task.id);
+  return watch.output ? tailLines(watch.output.trimEnd(), LIVE_TAIL_LINES) : "";
+}
+
 /** Format live status text for streaming display (unicode icons, no ANSI colors). */
-function formatLiveStatus(tasks: Task[]): string {
+function formatLiveStatus(tasks: Task[], sessionId: string): string {
   const running = tasks.filter((t) => t.status === "running").length;
   const done = tasks.length - running;
   const header = `Waiting: ${done}/${tasks.length} done, ${running} running`;
 
-  const lines = tasks.map((t) => {
+  const lines: string[] = [];
+  for (const t of tasks) {
     const elapsed = ((Date.now() - t.startedAt) / 1000).toFixed(1);
     const icon = statusIcon(t.status);
     let line = `${icon} ${t.id}  [${t.type}]  ${t.status}  ${elapsed}s`;
     if (t.exitCode !== undefined && t.status !== "running") {
       line += `  exit=${t.exitCode}`;
     }
-    return line;
-  });
+    lines.push(line);
+
+    // Append a live tail for running tasks so progress is visible while waiting.
+    if (t.status === "running") {
+      const tail = liveTail(sessionId, t);
+      if (tail) {
+        for (const tl of tail.split("\n")) {
+          lines.push(`  │ ${tl}`);
+        }
+      }
+    }
+  }
 
   return `${header}\n\n${lines.join("\n")}`;
 }
@@ -202,7 +236,7 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
       if (tasks.length === 0) return;
       const results = tasks.map(taskToResult);
       onUpdate({
-        content: [{ type: "text" as const, text: formatLiveStatus(tasks) }],
+        content: [{ type: "text" as const, text: formatLiveStatus(tasks, sessionId) }],
         details: { results, timedOut: false },
       });
     };
@@ -239,7 +273,7 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
         .filter((t): t is Task => t !== undefined);
       if (tasks.length > 0) {
         onUpdate({
-          content: [{ type: "text" as const, text: formatLiveStatus(tasks) }],
+          content: [{ type: "text" as const, text: formatLiveStatus(tasks, sessionId) }],
           details: { results: tasks.map(taskToResult), timedOut },
         });
       }

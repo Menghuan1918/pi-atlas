@@ -12,7 +12,7 @@
 |------|------|
 | `CreateBash` | 后台执行 shell 命令，立即返回任务 ID。 |
 | `CreateAgent` | 后台启动 pi 子进程执行 agent 任务，立即返回任务 ID。内置角色：`explorer`、`code-reviewer`、`general`（自定义行为用 `general`）。 |
-| `AwaitTask` | 阻塞等待指定任务完成。默认超时 3600 秒；超时不会取消任务。 |
+| `AwaitTask` | 阻塞等待指定任务完成。默认超时 3600 秒；超时不会取消任务。等待期间实时流式显示状态：每个运行中的任务会附带 bash 输出尾部（或子代理的最后一个动作）。 |
 | `CancelTask` | 终止运行中的任务进程树（SIGTERM → 5秒 → SIGKILL）。 |
 | `ResumeTask` | 续跑已完成的 agent 任务（启动新子进程）。bash 任务不可续跑。 |
 | `ListTask` | 列出当前会话的所有任务（运行中和已完成）。 |
@@ -95,6 +95,8 @@ ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-time
 
 - `0` — 无限等待（默认）。
 - `>0` — 超时秒数。超时后：confirm → `false`，select → `default` 或 `(no answer / timed out)`，input → `default` 或 `(no answer / timed out)`。
+
+当 `goal`/auto-continue 激活时，超时被强制封顶为 **60 秒**（取 `min(配置, 60)`；`0`/无限视为 60s），避免无人应答的问题卡住自主续跑循环——超时后代理使用回退答案继续。该封顶只会*降低*配置值，不会拉长。
 
 每次 `ask_user` 调用时重新读取配置文件，其他扩展可随时覆盖写入以动态调整超时。
 

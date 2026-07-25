@@ -20,6 +20,15 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum, Type, type Static } from "@earendil-works/pi-ai";
 import { loadTimeoutConfig, ensureDefaultConfig } from "./config";
 import { showMultiQuestion, type MultiQuestion } from "./multi-question";
+import { targetManager } from "../target/target-manager.js";
+
+/**
+ * When goal/auto-continue is active, the agent is expected to work
+ * autonomously — an infinite ask_user wait would stall the continuation
+ * loop. Cap the timeout at this value so the user gets a window to answer,
+ * then the agent proceeds with the fallback answer.
+ */
+const GOAL_ACTIVE_TIMEOUT_CAP_S = 60;
 
 const AskUserSchema = Type.Object({
 	questions: Type.Array(
@@ -111,7 +120,18 @@ export default function askUserExtension(pi: ExtensionAPI): void {
 			// 2. Re-read the timeout config for this session (no caching — other
 			//    extensions may have updated it since session_start).
 			const sid = ctx.sessionManager.getSessionId();
-			const timeoutSeconds = loadTimeoutConfig(sid);
+			let timeoutSeconds = loadTimeoutConfig(sid);
+
+			// When goal/auto-continue is active, cap the timeout so an unanswered
+			// question can't stall the autonomous loop. This only ever *lowers*
+			// the configured timeout: 0 (infinite) → 60s, and any config > 60 → 60s;
+			// a shorter configured timeout (e.g. 30s) is left untouched.
+			if (targetManager.isAutoContinueActive(sid)) {
+				timeoutSeconds = Math.min(
+					timeoutSeconds > 0 ? timeoutSeconds : Infinity,
+					GOAL_ACTIVE_TIMEOUT_CAP_S,
+				);
+			}
 
 			// 3. Validate select questions have options.
 			for (const q of questions) {

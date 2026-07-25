@@ -12,7 +12,7 @@ Background task system with unified bash and agent execution. Seven tools:
 |------|-------------|
 | `CreateBash` | Run a shell command in the background. Returns immediately with a task ID. |
 | `CreateAgent` | Spawn a pi sub-process as a background agent task. Returns immediately with a task ID. Built-in agents: `explorer`, `code-reviewer`, `general` (use `general` for custom behavior). |
-| `AwaitTask` | Block until specified tasks finish. Default timeout 3600s; timeout does NOT cancel tasks. |
+| `AwaitTask` | Block until specified tasks finish. Default timeout 3600s; timeout does NOT cancel tasks. While waiting, streams a live status showing each running task's bash output tail (or the sub-agent's last action). |
 | `CancelTask` | Kill a running task's process tree (SIGTERM → 5s → SIGKILL). |
 | `ResumeTask` | Continue a finished agent task in a new sub-process. Bash tasks cannot be resumed. |
 | `ListTask` | List all tasks (running and finished) in the current session. |
@@ -95,6 +95,8 @@ The config file is created at `session_start` at:
 
 - `0` — wait indefinitely (default).
 - `>0` — timeout in seconds. On timeout: confirm → `false`, select → `default` or `(no answer / timed out)`, input → `default` or `(no answer / timed out)`.
+
+While `goal`/auto-continue is active, the timeout is capped at **60s** (`min(configured, 60)`; `0`/infinite becomes 60s) so an unanswered question can't stall the autonomous loop — the agent proceeds with the fallback answer. This only ever *lowers* the configured timeout.
 
 The file is re-read on every `ask_user` call, so other extensions can overwrite it at any time to change the timeout dynamically.
 
