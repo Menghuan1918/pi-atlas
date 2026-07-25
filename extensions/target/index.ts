@@ -52,6 +52,20 @@ export default function targetExtension(pi: ExtensionAPI): void {
       if (trimmed === "on") {
         const result = await targetManager.goalOn(sessionId);
         ctx.ui.notify(result.message, "info");
+        // When idle, immediately send the primary target text so the agent
+        // resumes work right away instead of waiting for the next settle.
+        // When streaming, skip — the guard injects a continuation on settle.
+        if (ctx.isIdle() && result.state.primary) {
+          try {
+            pi.sendUserMessage(result.state.primary.text);
+          } catch (err) {
+            console.error(
+              `[pi-atlas] /goal on send failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }
         return;
       }
 
@@ -59,6 +73,22 @@ export default function targetExtension(pi: ExtensionAPI): void {
       if (trimmed) {
         const result = await targetManager.goalSet(sessionId, trimmed);
         ctx.ui.notify(result.message, "info");
+        // When idle, immediately send the goal text as a user message so the
+        // agent starts working right away (instead of only setting the target
+        // and waiting for the next agent_settled). The raw goal text is sent;
+        // the completion-audit instructions are injected by the guard on
+        // subsequent settles. When streaming, skip — the guard handles it.
+        if (ctx.isIdle()) {
+          try {
+            pi.sendUserMessage(trimmed);
+          } catch (err) {
+            console.error(
+              `[pi-atlas] /goal send failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }
         return;
       }
 

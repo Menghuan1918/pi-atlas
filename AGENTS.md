@@ -91,19 +91,21 @@ TargetState { primary: TargetItem | null; secondary: TargetItem[]; autoContinue:
 
 | 用法 | 效果 |
 |------|------|
-| `/goal <text>` | 设置不可变主 target + 激活 auto-continue |
-| `/goal on` | 重新激活 auto-continue（primary 重置为 active） |
+| `/goal <text>` | 设置不可变主 target + 激活 auto-continue + 空闲时立即发送目标文本（启动首轮工作） |
+| `/goal on` | 重新激活 auto-continue（primary 重置为 active）+ 空闲时立即发送 primary 文本（恢复工作） |
 | `/goal off` | 关闭 auto-continue（primary 保留，agent 可修改） |
 | `/goal` | 显示当前状态 |
+
+> **立即发送**：`/goal <text>` 与 `/goal on` 在 agent 空闲（`isIdle`）时会立即 `sendUserMessage` 发送目标文本，触发首轮工作；agent 正在流式输出时跳过，由 guard 在 `agent_settled` 时注入续跑消息接手（避免与 guard 的 `followUp` 重复注入）。
 
 ### 状态流转
 
 ```
-/goal <text>      → primary={active}, autoContinue=true（主 target 锁定，set 被拒绝）
+/goal <text>      → primary={active}, autoContinue=true + 空闲时立即发送目标文本（主 target 锁定，set 被拒绝）
 autoContinue=true → agent 可 add/update，不可 set
 update id=0 completed/failed → autoContinue=false（主 target 解锁）
 /goal off         → autoContinue=false（主 target 解锁）
-/goal on          → primary={active}, autoContinue=true（主 target 重新锁定）
+/goal on          → primary={active}, autoContinue=true + 空闲时立即发送 primary 文本（主 target 重新锁定）
 Escape (aborted)  → autoContinue=false（与 /goal off 相同）
 ```
 
