@@ -327,6 +327,7 @@ export const createAgentTool: ToolDefinition<typeof createAgentParameters, Creat
     // Validate prompt
     if (!params.prompt?.trim()) {
       return {
+        isError: true,
         content: [{ type: "text", text: "Error: prompt must not be empty." }],
         details: { taskId: "", status: "failed", agent: params.agent },
       };

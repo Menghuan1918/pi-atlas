@@ -309,6 +309,7 @@ export const cancelTaskTool: ToolDefinition<typeof cancelTaskParameters> = {
       };
     } catch (error) {
       return {
+        isError: true,
         content: [
           {
             type: "text" as const,
@@ -431,6 +432,7 @@ export const watchTaskTool: ToolDefinition<typeof watchTaskParameters> = {
       };
     } catch (error) {
       return {
+        isError: true,
         content: [
           {
             type: "text" as const,

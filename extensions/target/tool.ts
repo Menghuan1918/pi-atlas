@@ -115,6 +115,7 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
     ): Promise<{
       content: { type: "text"; text: string }[];
       details: TargetToolDetails;
+      isError?: boolean;
     }> {
       const sessionId = ctx.sessionManager.getSessionId();
       const { action } = params;
@@ -137,6 +138,7 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
       if (action === "set") {
         if (!params.text?.trim()) {
           return {
+            isError: true,
             content: [
               { type: "text", text: "Error: 'text' is required for 'set'." },
             ],
@@ -162,6 +164,7 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
       if (action === "add") {
         if (!params.text?.trim()) {
           return {
+            isError: true,
             content: [
               { type: "text", text: "Error: 'text' is required for 'add'." },
             ],
@@ -187,6 +190,7 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
       if (action === "update") {
         if (params.id === undefined) {
           return {
+            isError: true,
             content: [
               { type: "text", text: "Error: 'id' is required for 'update'." },
             ],
@@ -199,6 +203,7 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
         }
         if (params.status === undefined && params.text === undefined && params.note === undefined) {
           return {
+            isError: true,
             content: [
               { type: "text", text: "Error: 'update' needs at least one of 'status', 'text', or 'note'." },
             ],
