@@ -8,7 +8,6 @@
  * Mapping reference (verified-reality.md §1.5):
  *   agent_start            → state_update{state:"running"}
  *   message_update(text_*) → agent_message_chunk / agent_message
- *   toolcall_end           → tool_call_update{status:"pending", rawInput}
  *   tool_execution_start   → tool_call_update{status:"in_progress"}
  *   tool_execution_update  → tool_call_update{content} (replace semantics)
  *   tool_execution_end     → tool_call_update{status:"completed"|"failed"}
@@ -99,6 +98,8 @@ export class UpdateMapper {
   private toolNames = new Map<string, string>();
   /** toolCallId → current status (for cancel marking). */
   private toolStatus = new Map<string, string>();
+  /** toolCallIds already marked cancelled (skip later status overwrites). */
+  private cancelledToolCalls = new Set<string>();
 
   constructor(options: UpdateMapperOptions = {}) {
     this.idFactory = options.idFactory ?? defaultIdFactory;
@@ -109,6 +110,7 @@ export class UpdateMapper {
     this.lastStopReason = null;
     this.toolNames.clear();
     this.toolStatus.clear();
+    this.cancelledToolCalls.clear();
   }
 
   /** Current assistant messageId (for the bridge to record messageId↔entryId). */
@@ -123,7 +125,9 @@ export class UpdateMapper {
 
   /** Build tool_call_update{status:"cancelled"} for every in-progress tool call. */
   cancelInProgressToolCalls(): SessionUpdate[] {
-    return this.inProgressToolCalls().map((id) => ({
+    const ids = this.inProgressToolCalls();
+    for (const id of ids) this.cancelledToolCalls.add(id);
+    return ids.map((id) => ({
       sessionUpdate: "tool_call_update",
       toolCallId: id,
       name: this.toolNames.get(id) ?? null,
@@ -141,6 +145,12 @@ export class UpdateMapper {
 
       case "message_end":
         return this.reduceMessageEnd(event.message);
+
+      case "message_start":
+        // Allocate a fresh messageId per assistant message so multi-message turns
+        // (tool use) don't collapse onto a single messageId.
+        if (event.message?.role === "assistant") this.assistantMessageId = this.idFactory();
+        return [];
 
       case "tool_execution_start":
         return this.reduceToolStart(event.toolCallId, event.toolName, event.args);
@@ -166,7 +176,6 @@ export class UpdateMapper {
 
       // Events A1 does not map (no ACP equivalent in scope, or handled elsewhere).
       case "turn_start":
-      case "message_start":
       case "agent_end":
       case "entry_appended":
       case "queue_update":
@@ -214,6 +223,7 @@ export class UpdateMapper {
   }
 
   private reduceToolStart(toolCallId: string, toolName: string, args: unknown): SessionUpdate[] {
+    if (this.cancelledToolCalls.has(toolCallId)) return [];
     this.toolNames.set(toolCallId, toolName);
     this.toolStatus.set(toolCallId, "in_progress");
     return [
@@ -228,6 +238,7 @@ export class UpdateMapper {
   }
 
   private reduceToolUpdate(toolCallId: string, toolName: string, partialResult: unknown): SessionUpdate[] {
+    if (this.cancelledToolCalls.has(toolCallId)) return [];
     const content = partialResultToContent(partialResult);
     return [
       {
@@ -240,6 +251,7 @@ export class UpdateMapper {
   }
 
   private reduceToolEnd(toolCallId: string, toolName: string, result: unknown, isError: boolean): SessionUpdate[] {
+    if (this.cancelledToolCalls.has(toolCallId)) return [];
     const content = partialResultToContent(result);
     this.toolStatus.set(toolCallId, isError ? "failed" : "completed");
     return [
@@ -255,21 +267,22 @@ export class UpdateMapper {
   }
 }
 
-/** Map a pi tool partialResult/result (cumulative, replace semantics) to ACP tool content blocks. */
-function partialResultToContent(partial: unknown): Array<{ type: "text"; text: string }> {
+/** Map a pi tool partialResult/result (cumulative, replace semantics) to ACP ToolCallContent blocks. */
+function partialResultToContent(partial: unknown): Array<{ type: "content"; content: { type: "text"; text: string } }> {
+  const wrap = (text: string) => ({ type: "content" as const, content: { type: "text" as const, text } });
   if (partial == null) return [];
-  if (typeof partial === "string") return [{ type: "text", text: partial }];
+  if (typeof partial === "string") return [wrap(partial)];
   if (typeof partial === "object") {
     const r = partial as Record<string, unknown>;
     if (Array.isArray(r.content)) {
       const texts = r.content
         .map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : ""))
         .filter(Boolean);
-      if (texts.length) return texts.map((t) => ({ type: "text" as const, text: t }));
+      if (texts.length) return texts.map(wrap);
     }
-    if (typeof r.text === "string") return [{ type: "text", text: r.text }];
+    if (typeof r.text === "string") return [wrap(r.text)];
   }
-  return [{ type: "text", text: resultToText(partial) }];
+  return [wrap(resultToText(partial))];
 }
 
 let counter = 0;

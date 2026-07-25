@@ -262,6 +262,34 @@ async function testAskUserCapabilityNoCrash(): Promise<void> {
   }
 }
 
+async function testMessageIdEntryMapping(): Promise<void> {
+  console.log("messageId ↔ entryId mapping (real turn)");
+  const { bridge, app, clientApp, updates } = harness({});
+  await withClient(app, clientApp, async (c) => {
+    await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+    const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+    // Turn 1: user(root) + assistant. Turn 2's user message has the turn-1
+    // assistant entry as parent → resolveAnchorBefore must be non-null.
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "first" }] });
+    await waitForIdle(updates);
+    updates.length = 0;
+    await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "second" }] });
+    await waitForIdle(updates);
+
+    const userMsg = updates.find((u) => u.update.sessionUpdate === "user_message");
+    const userMessageId = (userMsg?.update as { messageId?: string })?.messageId;
+    check(typeof userMessageId === "string", "captured 2nd-turn user messageId");
+    const anchor = bridge.resolveAnchorBefore(sessionId, userMessageId!);
+    check(anchor !== null, `resolveAnchorBefore non-null after real turn (got ${anchor})`);
+
+    const handle = bridge.getSessionHandle(sessionId);
+    check(!!handle && handle.messageMap.getEntryId(userMessageId!) !== undefined, "messageMap recorded user messageId→entryId");
+    const asstMsg = updates.find((u) => u.update.sessionUpdate === "agent_message");
+    const asstMessageId = (asstMsg?.update as { messageId?: string })?.messageId;
+    check(asstMessageId !== undefined && handle!.messageMap.getEntryId(asstMessageId!) !== undefined, "messageMap recorded assistant messageId→entryId");
+  });
+}
+
 /** Subprocess test: real stdio framing + EOF graceful exit (Spec §7.6). */
 async function testSubprocessFramingAndEof(): Promise<void> {
   console.log("subprocess: stdio framing + EOF");
@@ -334,6 +362,18 @@ async function testSubprocessFramingAndEof(): Promise<void> {
     const promptResp = await waitForResponse(promptId);
     check(promptResp?.result !== undefined && JSON.stringify(promptResp.result) === "{}", "session/prompt returns {} over stdio");
 
+    // §4.5: the prompt response must NOT be preempted by user_message.
+    const promptRespIdx = lines.findIndex((l) => {
+      try { return JSON.parse(l).id === promptId; } catch { return false; }
+    });
+    const userMsgIdx = lines.findIndex((l) => {
+      try {
+        const m = JSON.parse(l);
+        return m.method === "session/update" && m.params?.update?.sessionUpdate === "user_message";
+      } catch { return false; }
+    });
+    check(promptRespIdx !== -1 && userMsgIdx !== -1 && promptRespIdx < userMsgIdx, "prompt response precedes user_message (no preemption)");
+
     // Wait for the turn to settle (running + idle) over stdio.
     const idleDeadline = Date.now() + 5000;
     while (
@@ -383,6 +423,7 @@ async function main(): Promise<void> {
   await testListAndResume();
   await testCloseAndErrors();
   await testAskUserCapabilityNoCrash();
+  await testMessageIdEntryMapping();
   await testSubprocessFramingAndEof();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

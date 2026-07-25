@@ -116,9 +116,10 @@ async function main(): Promise<void> {
     const start = updates[0] as any;
     check(start.toolCallId === "tc1" && start.name === "read" && start.status === "in_progress" && JSON.stringify(start.rawInput) === '{"path":"/a"}', "tool start in_progress + rawInput");
     const upd = updates[1] as any;
-    check(upd.content?.length === 1 && upd.content[0].text === "line1\nline2", "tool update content (replace semantics)");
+    check(upd.content?.length === 1 && upd.content[0].type === "content" && upd.content[0].content?.text === "line1\nline2", "tool update content (ToolCallContent shape, replace semantics)");
     const end = updates[2] as any;
     check(end.status === "completed", "tool end completed");
+    check(end.content?.[0]?.type === "content", "tool end content is ToolCallContent");
   }
 
   console.log("tool error → failed");

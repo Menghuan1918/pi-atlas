@@ -22,7 +22,6 @@ import {
   type CreateAgentSessionOptions,
   type ExtensionUIContext,
   type ModelRuntime,
-  type SessionEntry,
   type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
@@ -164,7 +163,8 @@ export class PiAcpBridge {
     };
   }
 
-  async newSession(params: { cwd: string }): Promise<{ sessionId: string }> {
+  async newSession(params: { cwd: string; mcpServers?: unknown[]; additionalDirectories?: string[] }): Promise<{ sessionId: string }> {
+    // A1 ignores mcpServers/additionalDirectories (MCP-over-ACP is out of scope; TODO A2).
     const sessionManager = SessionManager.create(params.cwd, piSessionDir(params.cwd, this.agentDir));
     const handle = await this.createSession(params.cwd, sessionManager);
     return { sessionId: handle.sessionId };
@@ -212,16 +212,19 @@ export class PiAcpBridge {
     const userMessageId = this.idFactory();
     handle.pendingUserMessageId = userMessageId;
     handle.mapper.reset();
-    // Send user_message first (before state_update:running).
-    this.notify(sessionId, { sessionUpdate: "user_message", messageId: userMessageId, content: promptBlocks });
     const text = contentBlocksToText(promptBlocks);
-    // Microtask delay: synchronously emitting updates would preempt the prompt response.
-    queueMicrotask(() => {
+    // Defer to a macrotask so the prompt RESPONSE is written before any update.
+    // (A microtask is insufficient: the SDK's responder.respond() is itself awaited
+    // after the handler returns, so a microtask-sent user_message still preempts the
+    // response. setTimeout(0) runs after the response write chain, preserving order:
+    // response {} → user_message → state_update:running → …)
+    setTimeout(() => {
+      this.notify(sessionId, { sessionUpdate: "user_message", messageId: userMessageId, content: promptBlocks });
       void handle.session.prompt(text).catch((err) => {
         this.notify(sessionId, { sessionUpdate: "state_update", state: "idle", stopReason: "refusal" });
         this.logError("prompt error", err);
       });
-    });
+    }, 0);
     return {};
   }
 
@@ -295,21 +298,27 @@ export class PiAcpBridge {
     const updates = handle.mapper.reduce(event);
     for (const u of updates) this.notify(handle.sessionId, u);
 
-    // Record messageId ↔ entryId as entries are appended.
-    if (event.type === "entry_appended") {
-      this.recordEntryMapping(handle, event.entry);
+    // Record messageId ↔ entryId. pi emits message_end BEFORE persisting the entry
+    // (appendMessage runs synchronously right after the emit), so defer one tick and
+    // read the just-appended leaf entry. (entry_appended is never emitted for regular
+    // messages — only for custom entries — so it cannot drive this mapping.)
+    if (event.type === "message_end") {
+      const role = event.message?.role;
+      if (role === "user" || role === "assistant") {
+        queueMicrotask(() => this.recordMessageMapping(handle, role));
+      }
     }
   }
 
-  private recordEntryMapping(handle: SessionHandle, entry: SessionEntry): void {
-    if (entry.type !== "message") return;
-    const role = entry.message.role;
+  private recordMessageMapping(handle: SessionHandle, role: "user" | "assistant"): void {
+    const leaf = handle.sessionManager.getLeafEntry();
+    if (!leaf || leaf.type !== "message" || leaf.message.role !== role) return;
     if (role === "user" && handle.pendingUserMessageId) {
-      handle.messageMap.record(handle.pendingUserMessageId, entry.id);
+      handle.messageMap.record(handle.pendingUserMessageId, leaf.id);
       handle.pendingUserMessageId = null;
     } else if (role === "assistant") {
       const mid = handle.mapper.currentAssistantMessageId;
-      if (mid) handle.messageMap.record(mid, entry.id);
+      if (mid) handle.messageMap.record(mid, leaf.id);
     }
   }
 
@@ -344,7 +353,9 @@ export class PiAcpBridge {
 
   private notify(sessionId: string, update: SessionUpdate): void {
     if (!this.client) return;
-    void this.client.notify(methods.client.session.update, { sessionId, update });
+    void this.client.notify(methods.client.session.update, { sessionId, update }).catch(() => {
+      // connection closed / client gone — best-effort notification
+    });
   }
 
   private logError(label: string, err: unknown): void {
