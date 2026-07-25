@@ -183,6 +183,27 @@ export function targetScript(steps: Array<{ action: string; args?: Record<string
   };
 }
 
+/** Events for a turn that calls the pi-atlas `ask_user` tool with the given questions, then stops with toolUse. */
+export function askUserToolTurnEvents(questions: unknown): AssistantMessageEvent[] {
+  const toolCall: ToolCall = { type: "toolCall", id: "tc-ask", name: "ask_user", arguments: { questions } };
+  const msg = makeAssistantMessage([{ type: "text", text: "Asking the user." }, toolCall], "toolUse");
+  return [
+    { type: "start", partial: msg },
+    { type: "text_start", contentIndex: 0, partial: msg },
+    { type: "text_delta", contentIndex: 0, delta: "Asking the user.", partial: msg },
+    { type: "text_end", contentIndex: 0, content: "Asking the user.", partial: msg },
+    { type: "toolcall_start", contentIndex: 1, partial: msg },
+    { type: "toolcall_delta", contentIndex: 1, delta: JSON.stringify({ questions }), partial: msg },
+    { type: "toolcall_end", contentIndex: 1, toolCall, partial: msg },
+    { type: "done", reason: "toolUse", message: msg },
+  ];
+}
+
+/** Script: turn 0 calls `ask_user` with `questions` (tool use); turn 1 replies "Done." */
+export function askUserScript(questions: unknown): FakeScript {
+  return ({ callIndex }) => (callIndex === 0 ? askUserToolTurnEvents(questions) : textTurnEvents("Done."));
+}
+
 /** Script: turn 0 calls `read` on `filePath` (tool use); turn 1 replies "Done." */
 export function toolUseScript(filePath: string): FakeScript {
   return ({ callIndex }) => (callIndex === 0 ? toolUseTurnEvents(filePath) : textTurnEvents("Done."));

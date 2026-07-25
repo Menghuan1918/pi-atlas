@@ -17,11 +17,14 @@ import * as acp from "@agentclientprotocol/sdk/experimental/v2";
 import { PiAcpBridge } from "./bridge.js";
 import { createAgentApp } from "./agent-app.js";
 import { FAKE_MODEL, DEFAULT_FAKE_SCRIPT, createFakeModelRuntime } from "./fake-model.js";
+import { askUserExcludeToolsResolver } from "./types.js";
 
 function main(): void {
   const useFakeModel = process.env.PI_ACP_V2_FAKE_MODEL === "1";
   const bridge = new PiAcpBridge(
-    useFakeModel ? { model: FAKE_MODEL, modelRuntime: createFakeModelRuntime(DEFAULT_FAKE_SCRIPT) } : {},
+    useFakeModel
+      ? { model: FAKE_MODEL, modelRuntime: createFakeModelRuntime(DEFAULT_FAKE_SCRIPT), excludeToolsResolver: askUserExcludeToolsResolver }
+      : { excludeToolsResolver: askUserExcludeToolsResolver },
   );
   const app = createAgentApp(bridge);
 

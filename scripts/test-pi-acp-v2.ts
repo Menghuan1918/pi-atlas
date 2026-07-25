@@ -30,13 +30,15 @@ import {
   DEFAULT_FAKE_SCRIPT,
   FAKE_MODEL,
   hangingTurnEvents,
+  askUserScript,
   targetScript,
   textTurnEvents,
   toolUseScript,
   type FakeScript,
 } from "../extensions/pi-acp-v2/fake-model.js";
-import { clientDeclares, VENDOR_CAPABILITIES } from "../extensions/pi-acp-v2/types.js";
+import { askUserExcludeToolsResolver, clientDeclares, VENDOR_CAPABILITIES } from "../extensions/pi-acp-v2/types.js";
 import targetExtension from "../extensions/target/index.js";
+import askUserExtension from "../extensions/askuser/index.js";
 
 let pass = 0;
 let fail = 0;
@@ -56,14 +58,25 @@ function sleep(ms: number): Promise<void> {
 type UpdateNotification = { sessionId: string; update: SessionUpdate };
 
 /** In-process ACP harness: bridge + apps + collected session/update notifications. */
-function harness(opts: { script?: FakeScript; clientMeta?: Record<string, unknown>; idFactory?: () => string; extensionFactories?: InlineExtension[]; agentDir?: string }) {
+function harness(opts: {
+  script?: FakeScript;
+  clientMeta?: Record<string, unknown>;
+  idFactory?: () => string;
+  extensionFactories?: InlineExtension[];
+  agentDir?: string;
+  excludeToolsResolver?: (clientMeta: unknown) => string[];
+  /** If set, the (client) side answers `_ask_user` requests via this handler. */
+  askUserHandler?: (params: unknown) => unknown;
+}) {
   const updates: UpdateNotification[] = [];
+  const askUserRequests: { method: string; params: any }[] = [];
   const bridge = new PiAcpBridge({
     model: FAKE_MODEL,
     modelRuntime: createFakeModelRuntime(opts.script ?? DEFAULT_FAKE_SCRIPT),
     idFactory: opts.idFactory,
     extensionFactories: opts.extensionFactories,
     agentDir: opts.agentDir,
+    excludeToolsResolver: opts.excludeToolsResolver,
   });
   const app = createAgentApp(bridge);
   const clientApp = acp
@@ -71,7 +84,14 @@ function harness(opts: { script?: FakeScript; clientMeta?: Record<string, unknow
     .onNotification(acp.methods.client.session.update, (ctx) => {
       updates.push(ctx.params);
     });
-  return { bridge, app, clientApp, updates };
+  if (opts.askUserHandler) {
+    // _ask_user is a client-side vendor method: the adapter calls it, we answer.
+    clientApp.onRequest<unknown, unknown>("_ask_user", (p) => p, (ctx) => {
+      askUserRequests.push({ method: "_ask_user", params: ctx.params });
+      return opts.askUserHandler!(ctx.params);
+    });
+  }
+  return { bridge, app, clientApp, updates, askUserRequests };
 }
 
 async function withClient<T>(app: ReturnType<typeof createAgentApp>, clientApp: acp.ClientApp, fn: (c: AgentContext) => Promise<T>): Promise<T> {
@@ -363,6 +383,172 @@ async function testMessageIdEntryMapping(): Promise<void> {
     const asstMessageId = (asstMsg?.update as { messageId?: string })?.messageId;
     check(asstMessageId !== undefined && handle!.messageMap.getEntryId(asstMessageId!) !== undefined, "messageMap recorded assistant messageId→entryId");
   });
+}
+
+// ---- A3: ask_user gating + _ask_user bridge -------------------------------
+
+/** Extract the text of the last tool_call_update carrying content. */
+function lastToolResultText(updates: UpdateNotification[]): string {
+  const withContent = updates.filter((u) => u.update.sessionUpdate === "tool_call_update" && (u.update as { content?: unknown[] }).content);
+  const last = withContent[withContent.length - 1];
+  return ((last?.update as { content?: Array<{ content?: { text?: string } }> })?.content?.[0]?.content?.text) ?? "";
+}
+
+async function testAskUserSelect(): Promise<void> {
+  console.log("ask_user: select (declared) → _ask_user request + answer");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  const script = askUserScript([{ question: "Pick one", type: "select", options: ["Option A", "Option B"] }]);
+  const { app, clientApp, updates, askUserRequests } = harness({
+    script,
+    extensionFactories: [askUserExtension],
+    excludeToolsResolver: askUserExcludeToolsResolver,
+    agentDir: atlasDir,
+    askUserHandler: () => ({ action: "accept", content: "Option A" }),
+  });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: { _meta: { _ask_user: {} } } });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "ask" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "turn settles to idle");
+    });
+    check(askUserRequests.length === 1, `exactly one _ask_user request (got ${askUserRequests.length})`);
+    const p = askUserRequests[0]?.params as { mode?: string; sessionId?: string; title?: string; options?: string[] };
+    check(p?.mode === "select", "_ask_user mode=select");
+    check(typeof p?.sessionId === "string" && p.sessionId.length > 0, "_ask_user carries sessionId");
+    check(p?.title === "Pick one", "_ask_user title passed through");
+    check(Array.isArray(p?.options) && p.options.includes("Option A") && p.options.includes("Option B"), "_ask_user options carried");
+    check(lastToolResultText(updates).includes("Option A"), "tool result includes the chosen answer");
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
+async function testAskUserConfirm(): Promise<void> {
+  console.log("ask_user: confirm (declared) → _ask_user + boolean");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  const script = askUserScript([{ question: "Proceed?", type: "confirm" }]);
+  const { app, clientApp, updates, askUserRequests } = harness({
+    script,
+    extensionFactories: [askUserExtension],
+    excludeToolsResolver: askUserExcludeToolsResolver,
+    agentDir: atlasDir,
+    askUserHandler: () => ({ action: "accept", content: true }),
+  });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: { _meta: { _ask_user: {} } } });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "ask" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "turn settles to idle");
+    });
+    check(askUserRequests.length === 1, "_ask_user request sent");
+    check((askUserRequests[0]?.params as { mode?: string }).mode === "confirm", "mode=confirm");
+    check(lastToolResultText(updates).includes("Yes"), 'confirm true → answer "Yes"');
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
+async function testAskUserInput(): Promise<void> {
+  console.log("ask_user: input (declared) → _ask_user + string");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  const script = askUserScript([{ question: "Name?", type: "input", placeholder: "your name" }]);
+  const { app, clientApp, updates, askUserRequests } = harness({
+    script,
+    extensionFactories: [askUserExtension],
+    excludeToolsResolver: askUserExcludeToolsResolver,
+    agentDir: atlasDir,
+    askUserHandler: () => ({ action: "accept", content: "Alice" }),
+  });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: { _meta: { _ask_user: {} } } });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "ask" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "turn settles to idle");
+    });
+    check(askUserRequests.length === 1, "_ask_user request sent");
+    const p = askUserRequests[0]?.params as { mode?: string; placeholder?: string };
+    check(p?.mode === "input", "mode=input");
+    check(p?.placeholder === "your name", "placeholder carried");
+    check(lastToolResultText(updates).includes("Alice"), "input answer carried into tool result");
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
+async function testAskUserGated(): Promise<void> {
+  console.log("ask_user: undeclared _ask_user → tool excluded, no _ask_user request");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  // Client does NOT declare _ask_user → resolver excludes the tool. The fake model
+  // still emits an ask_user toolcall, which pi reports as "not found" (excluded).
+  const script = askUserScript([{ question: "Pick", type: "select", options: ["A", "B"] }]);
+  const { app, clientApp, updates, askUserRequests } = harness({
+    script,
+    extensionFactories: [askUserExtension],
+    excludeToolsResolver: askUserExcludeToolsResolver,
+    agentDir: atlasDir,
+    askUserHandler: () => ({ action: "accept", content: "A" }),
+  });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      // No _meta._ask_user → ask_user is excluded.
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "ask" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "turn still settles to idle (no crash)");
+    });
+    check(askUserRequests.length === 0, "no _ask_user request when capability undeclared");
+    // The ask_user toolcall failed as "not found" (excluded) — status failed.
+    const failed = updates.find(
+      (u) => u.update.sessionUpdate === "tool_call_update" && (u.update as { status?: string }).status === "failed",
+    );
+    check(!!failed, "excluded tool call reported as failed");
+    check(lastToolResultText(updates).includes("not found"), 'error text mentions "not found"');
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
+}
+
+async function testAskUserDecline(): Promise<void> {
+  console.log("ask_user: decline → cancel value, no crash");
+  const atlasDir = freshAtlasDir();
+  process.env.PI_ATLAS_DIR = atlasDir;
+  // input question: decline → input returns undefined → askuser fallback "(cancelled)".
+  // (select decline would additionally trigger askuser's "Other" input fallback,
+  //  muddying the request count; input gives a single clean _ask_user request.)
+  const script = askUserScript([{ question: "Name?", type: "input" }]);
+  const { app, clientApp, updates, askUserRequests } = harness({
+    script,
+    extensionFactories: [askUserExtension],
+    excludeToolsResolver: askUserExcludeToolsResolver,
+    agentDir: atlasDir,
+    askUserHandler: () => ({ action: "decline" }),
+  });
+  try {
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: { _meta: { _ask_user: {} } } });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "ask" }] });
+      const ok = await waitForIdle(updates, 8000);
+      check(ok, "turn settles to idle after decline");
+    });
+    check(askUserRequests.length === 1, `single _ask_user request (got ${askUserRequests.length})`);
+    check((askUserRequests[0]?.params as { mode?: string }).mode === "input", "request mode=input");
+    // decline → input returns undefined → askuser fallback "(cancelled)".
+    check(lastToolResultText(updates).includes("(cancelled)"), 'decline → cancel fallback in tool result');
+  } finally {
+    rmSync(atlasDir, { recursive: true, force: true });
+  }
 }
 
 /** Subprocess test: real stdio framing + EOF graceful exit (Spec §7.6). */
@@ -675,6 +861,11 @@ async function main(): Promise<void> {
   await testPlanDedup();
   await testPlanRemovedOnClear();
   await testNoPlanWhenNeverHadTarget();
+  await testAskUserSelect();
+  await testAskUserConfirm();
+  await testAskUserInput();
+  await testAskUserGated();
+  await testAskUserDecline();
   await testSubprocessFramingAndEof();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

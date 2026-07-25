@@ -47,9 +47,9 @@ import {
   ADAPTER_NAME,
   ADAPTER_TITLE,
   ADAPTER_VERSION,
-  placeholderUIContext,
   readClientMeta,
 } from "./types.js";
+import { createAskUserUiContext } from "./ask-user-ui.js";
 
 /** Per-session state. */
 export interface SessionHandle {
@@ -330,9 +330,21 @@ export class PiAcpBridge {
    * session map under the (new) pi sessionId.
    */
   async attachSession(session: AgentSession, sessionManager: SessionManager, cwd: string): Promise<SessionHandle> {
-    await session.bindExtensions({ mode: "rpc", uiContext: this.uiContext ?? placeholderUIContext() });
+    const sessionId = sessionManager.getSessionId();
+    // A3: inject the real uiContext that bridges ctx.ui.select/confirm/input to
+    // ACP `_ask_user`. A test may override via BridgeOptions.uiContext (mock);
+    // otherwise build the per-session bridge that closes over this session's id
+    // + the bridge client. (Verified: mode:"rpc" + uiContext makes ctx.ui hit
+    // our impl directly — notes §1.7.)
+    const uiContext =
+      this.uiContext ??
+      createAskUserUiContext({
+        getClient: () => this.client,
+        getSessionId: () => sessionId,
+      });
+    await session.bindExtensions({ mode: "rpc", uiContext });
     const handle: SessionHandle = {
-      sessionId: sessionManager.getSessionId(),
+      sessionId,
       session,
       sessionManager,
       mapper: new UpdateMapper({ idFactory: this.idFactory }),

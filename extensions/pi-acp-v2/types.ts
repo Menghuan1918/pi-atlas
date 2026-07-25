@@ -1,7 +1,6 @@
 /**
  * Shared types and constants for the pi-acp-v2 adapter.
  */
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 
 /** Adapter identity advertised in `initialize`. */
 export const ADAPTER_NAME = "pi-acp-v2";
@@ -35,40 +34,13 @@ export function clientDeclares(clientMeta: unknown, key: string): boolean {
   return !!(clientMeta && typeof clientMeta === "object" && (clientMeta as Record<string, unknown>)[key]);
 }
 
-/** A no-op ExtensionUIContext placeholder. A3 replaces this with the _ask_user bridge. */
-export function placeholderUIContext(): ExtensionUIContext {
-  const noop = () => {};
-  const pending = () => Promise.resolve(undefined);
-  return {
-    select: pending,
-    confirm: () => Promise.resolve(false),
-    input: pending,
-    notify: noop,
-    onTerminalInput: () => noop,
-    setStatus: noop,
-    setWorkingMessage: noop,
-    setWorkingVisible: noop,
-    setWorkingIndicator: noop,
-    setHiddenThinkingLabel: noop,
-    setWidget: noop,
-    setFooter: noop,
-    setHeader: noop,
-    setTitle: noop,
-    custom: () => Promise.resolve(undefined as never),
-    pasteToEditor: noop,
-    setEditorText: noop,
-    getEditorText: () => "",
-    editor: () => Promise.resolve(undefined),
-    addAutocompleteProvider: noop,
-    setEditorComponent: noop,
-    getEditorComponent: () => undefined,
-    get theme() {
-      return undefined as never;
-    },
-    getAllThemes: () => [],
-    getTheme: () => undefined,
-    setTheme: () => ({ success: false, error: "no UI" }),
-    getToolsExpanded: () => false,
-    setToolsExpanded: noop,
-  } as unknown as ExtensionUIContext;
+/**
+ * A3 capability gating: exclude pi's `ask_user` tool unless the client declared
+ * the `_ask_user` vendor capability. Wired as the bridge's `excludeToolsResolver`
+ * (applied per session via `createAgentSession({ excludeTools })`). When the
+ * client did NOT declare `_ask_user`, the tool is hidden from the model and any
+ * attempted call fails as "not found" — and no `_ask_user` request is ever sent.
+ */
+export function askUserExcludeToolsResolver(clientMeta: unknown): string[] {
+  return clientDeclares(clientMeta, VENDOR_CAPABILITIES.askUser) ? [] : ["ask_user"];
 }
