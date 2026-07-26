@@ -34,6 +34,7 @@ import {
   targetScript,
   textTurnEvents,
   toolUseScript,
+  readOnTriggerScript,
   type FakeScript,
 } from "../extensions/pi-acp-v2/fake-model.js";
 import { askUserExcludeToolsResolver, clientDeclares, VENDOR_CAPABILITIES } from "../extensions/pi-acp-v2/types.js";
@@ -251,6 +252,35 @@ async function testToolUseTurn(): Promise<void> {
     });
   } finally {
     rmSync(tmpFile, { force: true });
+  }
+}
+
+async function testResumeUsesSessionOwnCwd(): Promise<void> {
+  console.log("resume keeps the session's own cwd (not the client's)");
+  const workCwd = mkdtempSync(join(tmpdir(), `pi-acp-cwd-${Date.now()}-`));
+  writeFileSync(join(workCwd, "MARKER.txt"), "FOUND-IT");
+  try {
+    const { bridge, app, clientApp, updates } = harness({ script: readOnTriggerScript("read it", "MARKER.txt") });
+    await withClient(app, clientApp, async (c) => {
+      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: {} });
+      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: workCwd });
+      // One echo turn so the session file persists (resume needs a saved session).
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "init" }] });
+      await waitForIdle(updates);
+      updates.length = 0;
+      // Resume with a WRONG client cwd — the session must still run in workCwd.
+      await bridge.resumeSession({ sessionId, cwd: "/tmp", replayFrom: { type: "start" } });
+      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "read it" }] });
+      await waitForIdle(updates, 8000);
+      const toolUpdates = updates.filter((u) => u.update.sessionUpdate === "tool_call_update");
+      const withContent = toolUpdates.find((u) => (u.update as { content?: unknown[] }).content);
+      const c0 = (withContent!.update as { content?: Array<{ type: string; content?: { type: string; text?: string } }> }).content?.[0];
+      check(c0?.content?.type === "text", "read tool produced text content");
+      check(c0?.content?.text === "FOUND-IT", `resumed session read relative file in its own cwd (got ${c0?.content?.text})`);
+    });
+  } finally {
+    rmSync(join(workCwd, "MARKER.txt"), { force: true });
+    rmSync(workCwd, { recursive: true, force: true });
   }
 }
 
@@ -1182,6 +1212,7 @@ async function main(): Promise<void> {
   await testCancel();
   await testSessionBusy();
   await testToolUseTurn();
+  await testResumeUsesSessionOwnCwd();
   await testListAndResume();
   await testCloseAndErrors();
   await testAskUserCapabilityNoCrash();

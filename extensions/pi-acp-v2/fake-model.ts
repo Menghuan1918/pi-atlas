@@ -209,5 +209,12 @@ export function toolUseScript(filePath: string): FakeScript {
   return ({ callIndex }) => (callIndex === 0 ? toolUseTurnEvents(filePath) : textTurnEvents("Done."));
 }
 
+/** Script: a prompt whose text === `trigger` calls `read` on a relative `filePath`
+ *  (so the built-in read tool resolves it against the session's cwd); any other
+ *  prompt just echoes. Used to assert the session runs in its own cwd after resume. */
+export function readOnTriggerScript(trigger: string, filePath: string): FakeScript {
+  return ({ userText }) => (userText === trigger ? toolUseTurnEvents(filePath) : textTurnEvents(`echo: ${userText}`));
+}
+
 /** Default fake script for the env-gated server: echo the user's text. */
 export const DEFAULT_FAKE_SCRIPT: FakeScript = ({ userText }) => textTurnEvents(`echo: ${userText}`);
