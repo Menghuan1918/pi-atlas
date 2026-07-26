@@ -222,7 +222,12 @@ export class PiAcpBridge {
     const match = infos.find((i) => i.id === params.sessionId);
     if (!match) throw new RequestError(-32602, `Unknown session: ${params.sessionId}`);
     const sessionManager = SessionManager.open(match.path);
-    const handle = await this.createSession(params.cwd, sessionManager);
+    // A session's cwd is intrinsic to it (encoded in its path + persisted state),
+    // NOT the client-supplied `params.cwd` — using the latter would make a
+    // resumed session run in the caller's cwd (e.g. a frontend's placeholder
+    // "/tmp"), breaking relative-path tool calls. B1/B2 clients pass an
+    // arbitrary cwd, so we always restore the session's own.
+    const handle = await this.createSession(match.cwd, sessionManager);
     // replayFrom omitted/null → resume WITHOUT replaying history (session loaded, ready for new prompts);
     // replayFrom {type:"start"} → replay the whole active branch as user/agent messages.
     if (params.replayFrom?.type === "start") {
