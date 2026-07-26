@@ -922,5 +922,19 @@ export class TaskManager {
 // This keeps the promise alive until awaiters attach to it.
 const taskCompletionPromises = new Map<string, Promise<Task>>();
 
-/** Shared singleton task manager instance. */
-export const taskManager = new TaskManager();
+/**
+ * Shared singleton task manager instance.
+ *
+ * Pinned to globalThis because pi's extension loader uses jiti with
+ * `moduleCache: false`, which re-evaluates this module on every cross-extension
+ * import. A plain `new TaskManager()` would hand the guard extension a
+ * *different* instance than the task extension — so the guard's
+ * `getActiveTasks` could never see the tasks CreateBash registered, and the
+ * "background tasks running" guard never fired. globalThis survives module
+ * re-evaluation, so all extensions share one instance.
+ */
+const _taskManagerGlobal = globalThis as unknown as {
+  __PI_ATLAS_TASK_MANAGER__?: TaskManager;
+};
+export const taskManager: TaskManager =
+  _taskManagerGlobal.__PI_ATLAS_TASK_MANAGER__ ??= new TaskManager();

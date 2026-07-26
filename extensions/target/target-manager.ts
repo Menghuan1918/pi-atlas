@@ -447,5 +447,17 @@ class TargetManager {
   }
 }
 
-/** Singleton — shared across all event handlers and tool calls. */
-export const targetManager = new TargetManager();
+/**
+ * Singleton — shared across all event handlers and tool calls.
+ *
+ * Pinned to globalThis: pi's extension loader uses jiti with `moduleCache: false`,
+ * which re-evaluates this module on every cross-extension import. Without
+ * globalThis, the guard extension would get a different instance than the
+ * target extension, breaking auto-continue (the guard could never see the
+ * primary target the /goal command set).
+ */
+const _targetManagerGlobal = globalThis as unknown as {
+  __PI_ATLAS_TARGET_MANAGER__?: TargetManager;
+};
+export const targetManager: TargetManager =
+  _targetManagerGlobal.__PI_ATLAS_TARGET_MANAGER__ ??= new TargetManager();
