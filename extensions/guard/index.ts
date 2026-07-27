@@ -8,6 +8,9 @@
  *   2. Background tasks (task extension) → task guard takes priority.
  *   3. Target auto-continue → inject continuation message.
  *
+ *   Notifications (Feishu) fire at two points: on the `AskUser` tool call, and
+ *   at `agent_settled` when no guard injects (truly idle). See `./notify.js`.
+ *
  * The task guard logic is imported from `extensions/task/guard.js` (the
  * `createGuardHandler` function). The target guard logic lives in
  * `extensions/target/guard.js`.
@@ -26,6 +29,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createGuardHandler as createTaskGuard } from "../task/guard.js";
 import { taskManager } from "../task/task-manager.js";
 import { createTargetGuardHandler, wasLastTurnAborted } from "../target/guard.js";
+import { targetManager } from "../target/target-manager.js";
+import { notify } from "./notify.js";
 
 export default function guardExtension(pi: ExtensionAPI): void {
   // Task guard handlers (onSettle + onTurnEnd).
@@ -33,6 +38,13 @@ export default function guardExtension(pi: ExtensionAPI): void {
 
   // Target guard handler.
   const targetGuard = createTargetGuardHandler(pi);
+
+  // ── tool_call: notify on AskUser (agent requesting input) ──────────
+  // Fires before the tool executes; AskUser blocks the turn, so this never
+  // overlaps with the `agent_settled` session-end notification below.
+  pi.on("tool_call", (event, ctx) => {
+    if (event.toolName === "AskUser") void notify(ctx, "askUser");
+  });
 
   // ── turn_end: delegate to task guard's onTurnEnd ────────────────────
   pi.on("turn_end", (event) => {
@@ -61,6 +73,13 @@ export default function guardExtension(pi: ExtensionAPI): void {
     }
 
     // 3. No tasks running → check target auto-continue.
+    //    When auto-continue is inactive the target guard is a no-op (it only
+    //    resets its `injecting` flag) — that is the truly-idle point where no
+    //    guard will inject, so fire the session-end notification. Auto-continue
+    //    runs inject instead (not a real session end → no notification).
+    if (!targetManager.isAutoContinueActive(sessionId)) {
+      void notify(ctx, "sessionEnd");
+    }
     targetGuard(event, ctx);
   });
 }

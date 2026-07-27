@@ -55,3 +55,16 @@ export function getAgentSessionDir(sessionId: string): string {
 export function getModelTiersPath(): string {
   return join(getAtlasDir(), "model-tiers.json");
 }
+
+/**
+ * Get the path to the global Feishu notification config file.
+ *
+ *   `~/.pi/atlas/notify.json`
+ *
+ * Holds the webhook URL/secret, the button jump base URL, and an enabled flag.
+ * Global (not per-session) — webhook credentials don't change per session. The
+ * per-session `sessionId` is read from the event context at notify time.
+ */
+export function getNotifyConfigPath(): string {
+  return join(getAtlasDir(), "notify.json");
+}

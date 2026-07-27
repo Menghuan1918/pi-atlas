@@ -11,7 +11,7 @@ extensions/
 ├── task/                     # 后台任务系统（CreateBash / CreateAgent / AwaitTask …）
 ├── askuser/                  # AskUser 工具（select / input）
 ├── target/                   # 目标管理（Target 工具 + /goal 命令）
-└── guard/                    # agent_settled guard 协调器（task + target 优先级）
+└── guard/                    # agent_settled guard 协调器（task + target 优先级）+ 飞书通知
 ```
 
 每个扩展导出 `default` 工厂函数 `(pi: ExtensionAPI) => void`，通过 `pi.registerTool()` 注册工具、`pi.on(event, handler)` 注册生命周期事件。
@@ -22,6 +22,7 @@ extensions/
 
 ```
 ~/.pi/atlas/
+├── notify.json                # 全局飞书通知配置（webhook / webUrl / enabled）
 └── sessions/<sessionId>/
     ├── task/
     │   ├── tasks.json            # 任务元数据
@@ -37,10 +38,11 @@ extensions/
 定义在 `extensions/shared/atlas-paths.ts`，所有扩展通过它获取存储路径：
 
 ```ts
-import { getAtlasDir, getAtlasSessionDir, ENV_ATLAS_DIR } from "../shared/atlas-paths.js";
+import { getAtlasDir, getAtlasSessionDir, getNotifyConfigPath, ENV_ATLAS_DIR } from "../shared/atlas-paths.js";
 
 getAtlasDir()                  // → ~/.pi/atlas/（基目录）
 getAtlasSessionDir(sessionId)  // → ~/.pi/atlas/sessions/<sessionId>/
+getNotifyConfigPath()          // → ~/.pi/atlas/notify.json（全局飞书通知配置）
 ```
 
 - 默认基目录是 `~/.pi/atlas/`（与 pi 自身的 `~/.pi/agent/` 平级）。
@@ -118,3 +120,30 @@ Escape (aborted)  → autoContinue=false（与 /goal off 相同）
 3. **Target auto-continue**：autoContinue=true && primary=active → 注入续跑消息（含 completion audit）
 
 续跑消息作为新 user 消息追加到对话尾部（`deliverAs: "followUp"`），不触碰 system prompt，不破坏 API 前缀缓存。
+
+### 飞书通知（Feishu）
+
+实现见 `extensions/guard/notify.ts`，在两个时机发送精简卡片（pwd 末两段 + 「打开会话」按钮）：
+
+1. **AskUser**：监听 `tool_call`，`toolName === "AskUser"` 时通知（工具执行前触发，AskUser 阻塞 turn，与会话结束通知不冲突）。
+2. **会话结束**：`agent_settled` 中当 Escape / 后台任务 / auto-continue 三个 guard **均不注入**（即 auto-continue 未激活、无运行中任务、非中断）时通知——agent 真正交还控制权。
+
+排除条件（满足任一则不通知）：
+- **subagent**：`PI_ATLAS_TASK_DEPTH > 0`（与 task 扩展判定子代理一致，由 CreateAgent spawn 时注入）。
+- **非交互模式**：仅 `tui` 模式通知（print/json/rpc 为程序化调用，无人在看卡片）。
+- **会触发 guard 续跑**：仅对「会话结束」生效——auto-continue 激活期间持续续跑，零通知，直到目标完成、agent 真正空闲时通知一次。AskUser 不属此类，即便在 auto-continue 运行中也照样通知。
+
+配置存全局 `~/.pi/atlas/notify.json`（非按 session）：
+
+```json
+{
+  "enabled": true,
+  "webhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/<id>",
+  "webhookSecret": "<可选，webhook 启用签名时填>",
+  "webUrl": "https://pi-web.menghuan1918.com"
+}
+```
+
+- 文件缺失 / `enabled:false` / `webhookUrl` 为空 → 静默不通知（安全默认，源码不含密钥）。
+- 每次通知时同步重读配置（用户改完即生效，无需重启）。`webUrl` 决定按钮跳转地址 `${webUrl}/?session=${sessionId}`。
+- 通知为 fire-and-forget（fetch 8s 超时、全程吞错写 stderr），失败绝不影响 guard 主流程。
