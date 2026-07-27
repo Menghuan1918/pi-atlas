@@ -1,10 +1,9 @@
 /**
- * askuser extension — registers the `ask_user` tool.
+ * askuser extension — registers the `AskUser` tool.
  *
  * Lets the agent ask the user one or more questions and block for answers. A
  * single call may batch multiple questions, each of type:
  *   - "select"  → single choice from `options`
- *   - "confirm" → yes/no
  *   - "input"   → free text
  *
  * In interactive (TUI) mode, all questions are shown on a single screen with
@@ -24,7 +23,7 @@ import { targetManager } from "../target/target-manager.js";
 
 /**
  * When goal/auto-continue is active, the agent is expected to work
- * autonomously — an infinite ask_user wait would stall the continuation
+ * autonomously — an infinite AskUser wait would stall the continuation
  * loop. Cap the timeout at this value so the user gets a window to answer,
  * then the agent proceeds with the fallback answer.
  */
@@ -34,7 +33,7 @@ const AskUserSchema = Type.Object({
 	questions: Type.Array(
 		Type.Object({
 			question: Type.String({ description: "The question to ask" }),
-			type: StringEnum(["select", "confirm", "input"], {
+			type: StringEnum(["select", "input"], {
 				description: "Question type. Default: 'input'",
 				default: "input",
 			}),
@@ -78,25 +77,25 @@ function fallbackAnswer(q: { default?: string }, timedOut: boolean): string {
 export default function askUserExtension(pi: ExtensionAPI): void {
 	// Create the per-session config directory + default config file.
 	// Other extensions can overwrite the file to change the timeout;
-	// the new value takes effect on the next ask_user call.
+	// the new value takes effect on the next AskUser call.
 	pi.on("session_start", (_event, ctx) => {
 		const sid = ctx.sessionManager.getSessionId();
 		ensureDefaultConfig(sid);
 	});
 
 	pi.registerTool({
-		name: "ask_user",
+		name: "AskUser",
 		label: "Ask User",
 		description:
 			"Ask the user one or more questions and block for their answers. " +
-			"Supports 'select' (single choice), 'confirm' (yes/no) and 'input' " +
-			"(free text) question types. Use this when you need information or a " +
-			"decision from the user that you cannot infer yourself.",
+			"Supports 'select' (single choice) and 'input' (free text) question types. " +
+			"Use this when you need information or a decision from the user that you " +
+			"cannot infer yourself.",
 		promptSnippet:
-			"ask_user: ask the user questions (select/confirm/input) and wait for answers",
+			"AskUser: ask the user questions (select/input) and wait for answers",
 		promptGuidelines: [
-			"Prefer ask_user only when you genuinely need user input or a decision you cannot reasonably infer.",
-			"Batch related questions into a single ask_user call rather than calling it repeatedly.",
+			"Prefer AskUser only when you genuinely need user input or a decision you cannot reasonably infer.",
+			"Batch related questions into a single AskUser call rather than calling it repeatedly.",
 		],
 		parameters: AskUserSchema,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -154,7 +153,7 @@ export default function askUserExtension(pi: ExtensionAPI): void {
 			if (ctx.mode === "tui") {
 				const mqQuestions: MultiQuestion[] = questions.map((q) => ({
 					question: q.question,
-					type: (q.type ?? "input") as "select" | "confirm" | "input",
+					type: (q.type ?? "input") as "select" | "input",
 					options: q.options,
 					default: q.default,
 					placeholder: q.placeholder,
@@ -173,7 +172,7 @@ export default function askUserExtension(pi: ExtensionAPI): void {
 			}
 
 			// 5. Non-TUI interactive mode (e.g. RPC): fall back to sequential
-			//    ctx.ui.select / confirm / input dialogs.
+			//    ctx.ui.select / input dialogs.
 			const opts = timeoutOption(timeoutSeconds);
 			const answers: string[] = [];
 
@@ -192,9 +191,6 @@ export default function askUserExtension(pi: ExtensionAPI): void {
 					} else {
 						answer = choice;
 					}
-				} else if (type === "confirm") {
-					const confirmed = await ctx.ui.confirm(q.question, q.question, opts);
-					answer = confirmed ? "Yes" : "No";
 				} else {
 					const text = await ctx.ui.input(q.question, q.placeholder, opts);
 					answer = text !== undefined

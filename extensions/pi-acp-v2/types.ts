@@ -35,12 +35,12 @@ export function clientDeclares(clientMeta: unknown, key: string): boolean {
 }
 
 /**
- * A3 capability gating: exclude pi's `ask_user` tool unless the client declared
+ * A3 capability gating: exclude pi's `AskUser` tool unless the client declared
  * the `_ask_user` vendor capability. Wired as the bridge's `excludeToolsResolver`
  * (applied per session via `createAgentSession({ excludeTools })`). When the
  * client did NOT declare `_ask_user`, the tool is hidden from the model and any
  * attempted call fails as "not found" — and no `_ask_user` request is ever sent.
  */
 export function askUserExcludeToolsResolver(clientMeta: unknown): string[] {
-  return clientDeclares(clientMeta, VENDOR_CAPABILITIES.askUser) ? [] : ["ask_user"];
+  return clientDeclares(clientMeta, VENDOR_CAPABILITIES.askUser) ? [] : ["AskUser"];
 }

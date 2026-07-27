@@ -1,9 +1,9 @@
 /**
- * Runtime tests for the ask_user tool (execute logic, formatting, errors, timeout).
+ * Runtime tests for the AskUser tool (execute logic, formatting, errors, timeout).
  * Run: npx tsx verify/askuser.test.ts
  *
  * Tests cover both:
- *   - Sequential fallback (mode="rpc"): ctx.ui.select / confirm / input
+ *   - Sequential fallback (mode="rpc"): ctx.ui.select / input
  *   - TUI multi-question component (mode="tui"): ctx.ui.custom
  */
 
@@ -146,7 +146,7 @@ console.log("--- Sequential fallback (mode=rpc) ---");
 {
 	const { ctx } = makeSeqCtx({ hasUI: false, mode: "print" });
 	const r = await run(
-		{ questions: [{ question: "Pick", type: "select", options: ["a", "b"] }, { question: "Sure?", type: "confirm" }] },
+		{ questions: [{ question: "Pick", type: "select", options: ["a", "b"] }] },
 		ctx,
 	);
 	assert(r.isError === true, "non-interactive → isError true");
@@ -154,22 +154,21 @@ console.log("--- Sequential fallback (mode=rpc) ---");
 	assert(r.content[0].text.includes("select: Pick"), "summary includes first question");
 }
 
-// 2. Happy-path batch (select + confirm + input) formatting.
+// 2. Happy-path batch (select + input) formatting.
 {
 	startSession();
-	const { ctx, rec } = makeSeqCtx({ select: ["React"], confirm: [true], input: ["foo"] });
+	const { ctx, rec } = makeSeqCtx({ select: ["React"], input: ["foo"] });
 	const r = await run(
 		{
 			questions: [
 				{ question: "Which framework do you prefer?", type: "select", options: ["React", "Vue"] },
-				{ question: "Are you sure?", type: "confirm" },
 				{ question: "Name?", type: "input", placeholder: "your name" },
 			],
 		},
 		ctx,
 	);
 	const expected =
-		"Q1: Which framework do you prefer?\nA1: React\n\nQ2: Are you sure?\nA2: Yes\n\nQ3: Name?\nA3: foo";
+		"Q1: Which framework do you prefer?\nA1: React\n\nQ2: Name?\nA2: foo";
 	assert(r.content[0].text === expected, "batch Q/A formatting (blank line between)");
 	assert(r.isError !== true, "happy path not an error");
 	assert(JSON.stringify(rec.select[0].o) === JSON.stringify(["React", "Vue", "Other (free input)"]), "select receives options array + Other");
@@ -231,14 +230,6 @@ console.log("--- Sequential fallback (mode=rpc) ---");
 	assert(r.content[0].text === "Q1: Pick\nA1: (cancelled)", "cancel (infinite) → (cancelled)");
 }
 
-// 10. confirm false → "No".
-{
-	setConfig(0);
-	const { ctx } = makeSeqCtx({ confirm: [false] });
-	const r = await run({ questions: [{ question: "Sure?", type: "confirm" }] }, ctx);
-	assert(r.content[0].text === "Q1: Sure?\nA1: No", "confirm false → No");
-}
-
 // 11. Continue after a cancel: subsequent question still answered.
 {
 	setConfig(0);
@@ -253,14 +244,6 @@ console.log("--- Sequential fallback (mode=rpc) ---");
 		ctx,
 	);
 	assert(r.content[0].text === "Q1: First\nA1: (cancelled)\n\nQ2: Second\nA2: Vue", "continue after cancel");
-}
-
-// 12. confirm true → "Yes".
-{
-	setConfig(0);
-	const { ctx } = makeSeqCtx({ confirm: [true] });
-	const r = await run({ questions: [{ question: "Proceed?", type: "confirm" }] }, ctx);
-	assert(r.content[0].text === "Q1: Proceed?\nA1: Yes", "confirm true → Yes");
 }
 
 // 13. Re-read config: changing config file between calls takes effect.
@@ -293,20 +276,19 @@ console.log("\n--- TUI multi-question (mode=tui) ---");
 	assert(r.content[0].text === "Q1: Which framework?\nA1: React", "TUI select → answer");
 }
 
-// 15. TUI batch (select + confirm + input).
+// 15. TUI batch (select + input).
 {
-	const { ctx } = makeTuiCtx([["Vue", "Yes", "hello"]]);
+	const { ctx } = makeTuiCtx([["Vue", "hello"]]);
 	const r = await run(
 		{
 			questions: [
 				{ question: "Framework?", type: "select", options: ["React", "Vue"] },
-				{ question: "Sure?", type: "confirm" },
 				{ question: "Name?", type: "input" },
 			],
 		},
 		ctx,
 	);
-	const expected = "Q1: Framework?\nA1: Vue\n\nQ2: Sure?\nA2: Yes\n\nQ3: Name?\nA3: hello";
+	const expected = "Q1: Framework?\nA1: Vue\n\nQ2: Name?\nA2: hello";
 	assert(r.content[0].text === expected, "TUI batch formatting");
 }
 

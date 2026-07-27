@@ -9,7 +9,7 @@ extensions/
 ├── shared/
 │   └── atlas-paths.ts        # 所有扩展共享的路径辅助
 ├── task/                     # 后台任务系统（CreateBash / CreateAgent / AwaitTask …）
-├── askuser/                  # ask_user 工具（select / confirm / input）
+├── askuser/                  # AskUser 工具（select / input）
 ├── target/                   # 目标管理（Target 工具 + /goal 命令）
 └── guard/                    # agent_settled guard 协调器（task + target 优先级）
 ```

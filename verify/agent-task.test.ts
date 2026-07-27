@@ -909,7 +909,7 @@ console.log("\nTest 13a: parseModelPatternFromListOutput skips header, returns m
 // 14. ask_user always excluded from sub-agent args
 // ---------------------------------------------------------------------------
 
-console.log("\nTest 14: spawnAgent always passes --exclude-tools ask_user");
+console.log("\nTest 14: spawnAgent always passes --exclude-tools AskUser");
 {
   const tempDir = mkdtempSync(join(tmpdir(), "pi-agent-exclude-"));
   process.env.PI_CODING_AGENT_DIR = tempDir;
@@ -931,7 +931,7 @@ console.log("\nTest 14: spawnAgent always passes --exclude-tools ask_user");
     const { results } = await taskManager.awaitTasks(sessionId, [task.id], 15000);
     assert(results[0].status === "completed", "task completed");
     // The mock echoes [excluded=<tools>] when --exclude-tools is present
-    assert(results[0].output.includes("[excluded=ask_user]"), "--exclude-tools ask_user was passed");
+    assert(results[0].output.includes("[excluded=AskUser]"), "--exclude-tools AskUser was passed");
   } finally {
     process.argv[1] = savedArgv1;
     rmSync(sessionDir, { recursive: true, force: true });

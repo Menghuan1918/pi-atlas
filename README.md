@@ -33,11 +33,10 @@ Single tool that asks the user questions and blocks for answers:
 
 | Tool | Description |
 |------|-------------|
-| `ask_user` | Ask one or more questions (select / confirm / input). Batch supported. |
+| `AskUser` | Ask one or more questions (select / input). Batch supported. |
 
 **Key features:**
 - **select** — single choice from options, with an "Other (free input)" fallback for custom answers. In TUI mode, selecting "Other" opens an inline editor directly (no separate dialog).
-- **confirm** — yes/no dialog.
 - **input** — free-text input. In TUI mode, typing starts an inline editor immediately.
 - **TUI navigation** — in interactive mode, all questions are shown on one screen. Use ← → to switch between questions, ↑↓ to navigate options, Enter to confirm.
 - **Session-level timeout** — per-session config at `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` (`{"timeout": 0}` where 0 = infinite wait). Re-read on every call; other extensions can overwrite the file to change the timeout mid-session.
@@ -94,11 +93,11 @@ The config file is created at `session_start` at:
 ```
 
 - `0` — wait indefinitely (default).
-- `>0` — timeout in seconds. On timeout: confirm → `false`, select → `default` or `(no answer / timed out)`, input → `default` or `(no answer / timed out)`.
+- `>0` — timeout in seconds. On timeout: select → `default` or `(no answer / timed out)`, input → `default` or `(no answer / timed out)`.
 
 While `goal`/auto-continue is active, the timeout is capped at **60s** (`min(configured, 60)`; `0`/infinite becomes 60s) so an unanswered question can't stall the autonomous loop — the agent proceeds with the fallback answer. This only ever *lowers* the configured timeout.
 
-The file is re-read on every `ask_user` call, so other extensions can overwrite it at any time to change the timeout dynamically.
+The file is re-read on every `AskUser` call, so other extensions can overwrite it at any time to change the timeout dynamically.
 
 ### Agent nesting depth
 
@@ -144,7 +143,7 @@ extensions/
 │   ├── control.ts            # AwaitTask / CancelTask / ListTask / WatchTask
 │   └── guard.ts              # agent_settled guard
 ├── askuser/
-│   ├── index.ts              # Extension entry — registers ask_user tool
+│   ├── index.ts              # Extension entry — registers AskUser tool
 │   ├── config.ts             # Per-session timeout config reader
 │   └── multi-question.ts     # TUI multi-question component (← → navigation + inline editor)
 └── bash-timeout/

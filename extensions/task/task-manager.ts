@@ -264,7 +264,7 @@ export class TaskManager {
    * read events from stdout line-by-line.
    *
    * Session persistence is enabled so the sub-session is saved to the isolated
-   * atlas sub-sessions directory. `ask_user` is always excluded — sub-agents
+   * atlas sub-sessions directory. `AskUser` is always excluded — sub-agents
    * cannot prompt the user directly. If `resumeSid` is provided, `--session
    * <sid>` restores the prior conversation.
    */
@@ -283,7 +283,7 @@ export class TaskManager {
     // Build pi CLI arguments (--mode rpc, no -p, no prompt as positional arg).
     const args: string[] = ["--mode", "rpc"];
     args.push("--session-dir", options.sessionDir);
-    args.push("--exclude-tools", "ask_user");
+    args.push("--exclude-tools", "AskUser");
     if (options.resumeSid) {
       args.push("--session", options.resumeSid);
     }

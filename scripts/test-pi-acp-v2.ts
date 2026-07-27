@@ -456,34 +456,6 @@ async function testAskUserSelect(): Promise<void> {
   }
 }
 
-async function testAskUserConfirm(): Promise<void> {
-  console.log("ask_user: confirm (declared) → _ask_user + boolean");
-  const atlasDir = freshAtlasDir();
-  process.env.PI_ATLAS_DIR = atlasDir;
-  const script = askUserScript([{ question: "Proceed?", type: "confirm" }]);
-  const { app, clientApp, updates, askUserRequests } = harness({
-    script,
-    extensionFactories: [askUserExtension],
-    excludeToolsResolver: askUserExcludeToolsResolver,
-    agentDir: atlasDir,
-    askUserHandler: () => ({ action: "accept", content: true }),
-  });
-  try {
-    await withClient(app, clientApp, async (c) => {
-      await req(c, acp.methods.agent.initialize, { protocolVersion: 2, info: { name: "t", version: "1" }, capabilities: { _meta: { _ask_user: {} } } });
-      const { sessionId } = await req(c, acp.methods.agent.session.new, { cwd: "/tmp" });
-      await req(c, acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "ask" }] });
-      const ok = await waitForIdle(updates, 8000);
-      check(ok, "turn settles to idle");
-    });
-    check(askUserRequests.length === 1, "_ask_user request sent");
-    check((askUserRequests[0]?.params as { mode?: string }).mode === "confirm", "mode=confirm");
-    check(lastToolResultText(updates).includes("Yes"), 'confirm true → answer "Yes"');
-  } finally {
-    rmSync(atlasDir, { recursive: true, force: true });
-  }
-}
-
 async function testAskUserInput(): Promise<void> {
   console.log("ask_user: input (declared) → _ask_user + string");
   const atlasDir = freshAtlasDir();
@@ -1232,7 +1204,6 @@ async function main(): Promise<void> {
   await testPlanRemovedOnClear();
   await testNoPlanWhenNeverHadTarget();
   await testAskUserSelect();
-  await testAskUserConfirm();
   await testAskUserInput();
   await testAskUserGated();
   await testAskUserDecline();

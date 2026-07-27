@@ -1,5 +1,5 @@
 /**
- * E2E: verify ask_user is excluded from sub-agents (real pi).
+ * E2E: verify AskUser is excluded from sub-agents (real pi).
  * Run: npx tsx scripts/e2e-exclude-askuser.ts
  */
 import { mkdtempSync, rmSync } from "node:fs";
@@ -21,18 +21,18 @@ const savedArgv1 = process.argv[1];
 process.argv[1] = "/nonexistent/path/to/pi";
 
 try {
-  // general agent = no tools allowlist, so ask_user WOULD be visible
-  // unless --exclude-tools ask_user works.
+  // general agent = no tools allowlist, so AskUser WOULD be visible
+  // unless --exclude-tools AskUser works.
   const task = taskManager.createAgentTask(
     sessionId,
-    "Do you have a tool called ask_user available to you? Reply with exactly YES_ASKUSER or NO_ASKUSER.",
+    "Do you have a tool called AskUser available to you? Reply with exactly YES_ASKUSER or NO_ASKUSER.",
     { cwd: process.cwd(), sessionDir: subSessionDir, depth: 0, agent: undefined, tools: undefined },
   );
   const { results } = await taskManager.awaitTasks(sessionId, [task.id], 120_000);
   assert(results[0].status === "completed", "task completed");
   const answer = results[0].output.toUpperCase();
   console.log(`  sub-agent answer: "${results[0].output}"`);
-  assert(answer.includes("NO_ASKUSER"), "sub-agent does NOT see ask_user (excluded)");
+  assert(answer.includes("NO_ASKUSER"), "sub-agent does NOT see AskUser (excluded)");
 } finally {
   process.argv[1] = savedArgv1;
   rmSync(atlasDir, { recursive: true, force: true });

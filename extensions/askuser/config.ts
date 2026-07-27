@@ -10,7 +10,7 @@
  *
  * The config file is created at `session_start` with a default value of `0`.
  * Other extensions can overwrite the file at any time to change the timeout;
- * the new value takes effect on the next `ask_user` call (re-read each time).
+ * the new value takes effect on the next `AskUser` call (re-read each time).
  *
  * Missing, unreadable, or malformed config falls back to 0 (no timeout).
  */

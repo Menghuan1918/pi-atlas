@@ -1,5 +1,5 @@
 /**
- * Multi-question interactive UI component for the ask_user tool.
+ * Multi-question interactive UI component for the AskUser tool.
  *
  * Uses `ctx.ui.custom()` to render all questions on a single screen with:
  *   - ← / → arrow keys to switch between questions
@@ -33,7 +33,7 @@ import {
 
 export interface MultiQuestion {
   question: string;
-  type: "select" | "confirm" | "input";
+  type: "select" | "input";
   options?: string[];
   default?: string;
   placeholder?: string;
@@ -248,19 +248,6 @@ export function showMultiQuestion(
           }
           return;
         }
-      } else if (q.type === "confirm") {
-        if (matchesKey(data, Key.enter) || matchesKey(data, "y")) {
-          s.answer = "Yes";
-          s.answered = true;
-          advance();
-          return;
-        }
-        if (matchesKey(data, "n")) {
-          s.answer = "No";
-          s.answered = true;
-          advance();
-          return;
-        }
       } else {
         // input type — Enter when not editing starts editing
         if (matchesKey(data, Key.enter) && !s.answered) {
@@ -363,12 +350,6 @@ export function showMultiQuestion(
                 lines.push(`      ${line}`);
               }
             }
-          } else if (q.type === "confirm") {
-            const yes = s.answer === "Yes";
-            const no = s.answer === "No";
-            const yesLabel = yes ? theme.fg("success", "[✓] Yes") : theme.fg("text", "[ ] Yes");
-            const noLabel = no ? theme.fg("error", "[✓] No") : theme.fg("text", "[ ] No");
-            addWrappedWithPrefix("    ", `${yesLabel}  ${noLabel}`);
           } else {
             // input
             if (s.editing && s.editor) {
@@ -393,8 +374,6 @@ export function showMultiQuestion(
         hints.push("Enter submit", "Esc back");
       } else if (q.type === "select") {
         hints.push("↑↓ navigate", "Enter select", "Esc cancel");
-      } else if (q.type === "confirm") {
-        hints.push("Y/N select", "Esc cancel");
       } else {
         hints.push("Type to edit", "Enter submit", "Esc cancel");
       }

@@ -183,9 +183,9 @@ export function targetScript(steps: Array<{ action: string; args?: Record<string
   };
 }
 
-/** Events for a turn that calls the pi-atlas `ask_user` tool with the given questions, then stops with toolUse. */
+/** Events for a turn that calls the pi-atlas `AskUser` tool with the given questions, then stops with toolUse. */
 export function askUserToolTurnEvents(questions: unknown): AssistantMessageEvent[] {
-  const toolCall: ToolCall = { type: "toolCall", id: "tc-ask", name: "ask_user", arguments: { questions } };
+  const toolCall: ToolCall = { type: "toolCall", id: "tc-ask", name: "AskUser", arguments: { questions } };
   const msg = makeAssistantMessage([{ type: "text", text: "Asking the user." }, toolCall], "toolUse");
   return [
     { type: "start", partial: msg },
@@ -199,7 +199,7 @@ export function askUserToolTurnEvents(questions: unknown): AssistantMessageEvent
   ];
 }
 
-/** Script: turn 0 calls `ask_user` with `questions` (tool use); turn 1 replies "Done." */
+/** Script: turn 0 calls `AskUser` with `questions` (tool use); turn 1 replies "Done." */
 export function askUserScript(questions: unknown): FakeScript {
   return ({ callIndex }) => (callIndex === 0 ? askUserToolTurnEvents(questions) : textTurnEvents("Done."));
 }

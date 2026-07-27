@@ -33,11 +33,10 @@
 
 | 工具 | 说明 |
 |------|------|
-| `ask_user` | 提出一个或多个问题（select / confirm / input），支持批量提问。 |
+| `AskUser` | 提出一个或多个问题（select / input），支持批量提问。 |
 
 **核心特性：**
 - **select** — 单选，附带"Other (自由输入)"选项供自定义答案。TUI 模式下选择 "Other" 直接进入内联编辑（无需额外对话框）。
-- **confirm** — 是/否确认。
 - **input** — 自由文本输入。TUI 模式下直接输入即开始内联编辑。
 - **TUI 导航** — 交互模式下所有问题显示在同一屏。← → 切换问题，↑↓ 导航选项，Enter 确认。
 - **会话级超时** — 通过 per-session 配置文件 `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` 设置（`{"timeout": 0}`，0 = 无限等待）。每次调用时重新读取，其他扩展可随时覆盖写入以动态调整超时。
@@ -94,11 +93,11 @@ ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-time
 ```
 
 - `0` — 无限等待（默认）。
-- `>0` — 超时秒数。超时后：confirm → `false`，select → `default` 或 `(no answer / timed out)`，input → `default` 或 `(no answer / timed out)`。
+- `>0` — 超时秒数。超时后：select → `default` 或 `(no answer / timed out)`，input → `default` 或 `(no answer / timed out)`。
 
 当 `goal`/auto-continue 激活时，超时被强制封顶为 **60 秒**（取 `min(配置, 60)`；`0`/无限视为 60s），避免无人应答的问题卡住自主续跑循环——超时后代理使用回退答案继续。该封顶只会*降低*配置值，不会拉长。
 
-每次 `ask_user` 调用时重新读取配置文件，其他扩展可随时覆盖写入以动态调整超时。
+每次 `AskUser` 调用时重新读取配置文件，其他扩展可随时覆盖写入以动态调整超时。
 
 ### Agent 嵌套深度
 
@@ -144,7 +143,7 @@ extensions/
 │   ├── control.ts            # AwaitTask / CancelTask / ListTask / WatchTask
 │   └── guard.ts              # agent_settled 守卫
 ├── askuser/
-│   ├── index.ts              # 扩展入口 — 注册 ask_user 工具
+│   ├── index.ts              # 扩展入口 — 注册 AskUser 工具
 │   ├── config.ts             # Per-session 超时配置读取
 │   └── multi-question.ts     # TUI 多问题组件（← → 导航 + 内联编辑）
 └── bash-timeout/
