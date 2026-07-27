@@ -1179,6 +1179,13 @@ async function testForkDoesNotWipeOriginalTargetState(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Isolate ALL pi-atlas storage to a temp dir so spawned real pi sessions
+  // never read the user's real ~/.pi/atlas/notify.json (which would send
+  // live Feishu cards during tests). Per-case `freshAtlasDir()` overrides
+  // this for tests that need a clean slate; subprocess tests build their
+  // own env. This is the catch-all for tests that spawn sessions without
+  // setting PI_ATLAS_DIR themselves.
+  process.env.PI_ATLAS_DIR = mkdtempSync(join(tmpdir(), "pi-acp-atlas-"));
   await testInitializeAndCapabilities();
   await testPromptStreaming();
   await testCancel();

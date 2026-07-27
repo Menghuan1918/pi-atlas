@@ -6,9 +6,7 @@
  *   2. `agent_settled` when no guard will inject (agent truly idle) → "session ended".
  *
  * Exclusions (notify is a no-op):
- *   - subagent sessions (`PI_ATLAS_TASK_DEPTH > 0`),
- *   - non-interactive modes (notify only in `tui` — xbot fires for the
- *     interactive main session only; print/json/rpc are programmatic), and
+ *   - subagent sessions (`PI_ATLAS_TASK_DEPTH > 0`), and
  *   - session-end while a guard would inject (auto-continue / running tasks /
  *     aborted) — enforced by the call site in `guard/index.ts`, not here.
  *
@@ -168,9 +166,6 @@ async function sendFeishu(config: NotifyConfig, card: Record<string, unknown>): 
 export async function notify(ctx: ExtensionContext, type: NotifyType): Promise<void> {
   try {
     if (isSubagent()) return;
-    // Interactive main session only (mirrors xbot's "main agent" semantics);
-    // print/json/rpc are programmatic and have no human waiting on a card.
-    if (ctx.mode !== "tui") return;
     const config = loadNotifyConfig();
     if (!config) return;
     const cwd = ctx.cwd || ctx.sessionManager.getCwd();

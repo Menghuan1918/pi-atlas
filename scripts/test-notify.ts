@@ -151,20 +151,15 @@ assert(
   "askUser card sent",
 );
 
-// ── notify: non-interactive modes suppressed ──────────────────────
+// ── notify: mode-agnostic — fires in any mode (rpc/print/json/tui) ──
+// No mode gate; only subagent + config gating apply.
 writeConfig({ webhookUrl: "https://x/hook" });
-const ctxRpc = { ...ctx, mode: "rpc" } as unknown as ExtensionContext;
-const ctxPrint = { ...ctx, mode: "print" } as unknown as ExtensionContext;
-captured = null;
-await notify(ctxRpc, "sessionEnd");
-assert(captured === null, "rpc mode → no fetch");
-captured = null;
-await notify(ctxPrint, "askUser");
-assert(captured === null, "print mode → no fetch");
-// sanity: tui (the shared ctx) still sends
-captured = null;
-await notify(ctx, "sessionEnd");
-assert(captured !== null, "tui mode → fetch called");
+for (const mode of ["rpc", "print", "json", "tui"] as const) {
+  const modeCtx = { ...ctx, mode } as unknown as ExtensionContext;
+  captured = null;
+  await notify(modeCtx, "sessionEnd");
+  assert(captured !== null, `${mode} mode → fetch called`);
+}
 
 // ── cleanup ─────────────────────────────────────────────────────────
 globalThis.fetch = origFetch;

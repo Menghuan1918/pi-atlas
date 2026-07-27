@@ -130,8 +130,9 @@ Escape (aborted)  → autoContinue=false（与 /goal off 相同）
 
 排除条件（满足任一则不通知）：
 - **subagent**：`PI_ATLAS_TASK_DEPTH > 0`（与 task 扩展判定子代理一致，由 CreateAgent spawn 时注入）。
-- **非交互模式**：仅 `tui` 模式通知（print/json/rpc 为程序化调用，无人在看卡片）。
 - **会触发 guard 续跑**：仅对「会话结束」生效——auto-continue 激活期间持续续跑，零通知，直到目标完成、agent 真正空闲时通知一次。AskUser 不属此类，即便在 auto-continue 运行中也照样通知。
+
+> 通知与运行模式无关（tui / rpc / print / json 均触发）——pi-web 以 `rpc` 模式运行主会话，按模式过滤会漏掉 web 端通知。
 
 配置存全局 `~/.pi/atlas/notify.json`（非按 session）：
 
