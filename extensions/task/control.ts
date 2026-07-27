@@ -299,7 +299,7 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
 // ---------------------------------------------------------------------------
 
 const cancelTaskParameters = Type.Object({
-  taskId: Type.String({ description: "The ID of the task to cancel." }),
+  taskIds: Type.Array(Type.String(), { description: "IDs of the tasks to cancel." }),
 });
 
 type CancelTaskParams = Static<typeof cancelTaskParameters>;
@@ -317,42 +317,26 @@ export const cancelTaskTool: ToolDefinition<typeof cancelTaskParameters> = {
     ctx: ExtensionContext,
   ) {
     const sessionId = ctx.sessionManager.getSessionId();
-    try {
-      // Check if the task is already terminal — cancel is a no-op in that case.
-      const existing = taskManager.getTask(sessionId, params.taskId);
+    const lines: string[] = [];
+    for (const taskId of params.taskIds) {
+      // Already-terminal tasks are a no-op; cancel() would also no-op, but we
+      // surface a friendlier per-task line without killing anything.
+      const existing = taskManager.getTask(sessionId, taskId);
       if (existing && existing.status !== "running") {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Task ${params.taskId} is already ${existing.status} (exit code ${existing.exitCode ?? "N/A"}). No action taken.`,
-            },
-          ],
-          details: undefined,
-        };
+        lines.push(`Task ${taskId} is already ${existing.status} (exit code ${existing.exitCode ?? "N/A"}). No action taken.`);
+        continue;
       }
-      const task = await taskManager.cancel(sessionId, params.taskId);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Task ${task.id} cancelled. (exit code ${task.exitCode ?? "N/A"})`,
-          },
-        ],
-        details: undefined,
-      };
-    } catch (error) {
-      return {
-        isError: true,
-        content: [
-          {
-            type: "text" as const,
-            text: `Error cancelling task ${params.taskId}: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ],
-        details: undefined,
-      };
+      try {
+        const task = await taskManager.cancel(sessionId, taskId);
+        lines.push(`Task ${task.id} cancelled. (exit code ${task.exitCode ?? "N/A"})`);
+      } catch (error) {
+        lines.push(`Error cancelling task ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
+    return {
+      content: [{ type: "text" as const, text: lines.join("\n") }],
+      details: undefined,
+    };
   },
 };
 

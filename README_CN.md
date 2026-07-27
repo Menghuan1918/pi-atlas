@@ -114,7 +114,7 @@ ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-time
 | `code-reviewer` | 只读代码审查（需求合规 + 质量标准） | read, grep, bash |
 | `general` | 通用，无特殊提示词 — 用于自定义行为 | （所有工具） |
 
-自定义 agent 行为时使用 `general`，直接编写 task prompt — 它没有 `prefix`/`suffix`，你传入的 prompt 即完整指令。也可配合 `model` / `tools` / `cwd` 进一步定制。
+自定义 agent 行为时使用 `general`，直接编写 task prompt — 它没有 `prefix`/`suffix`，你传入的 prompt 即完整指令。也可配合 `model` / `cwd` 进一步定制。
 
 指定不存在的 agent 会报错并列出所有可用角色。
 

@@ -114,7 +114,7 @@ Three built-in agents are always available:
 | `code-reviewer` | Read-only code review against requirements and quality | read, grep, bash |
 | `general` | General-purpose, no special prompt — use for custom behavior | (all tools) |
 
-For custom agent behavior, use `general` and craft the task prompt directly — its `prefix`/`suffix` are empty, so the prompt you pass becomes the full instruction. You can also pass `model` / `tools` / `cwd` to tailor it.
+For custom agent behavior, use `general` and craft the task prompt directly — its `prefix`/`suffix` are empty, so the prompt you pass becomes the full instruction. You can also pass `model` / `cwd` to tailor it.
 
 Specifying a non-existent agent returns an error with the available agents list.
 

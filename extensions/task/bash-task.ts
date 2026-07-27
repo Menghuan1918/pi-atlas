@@ -25,11 +25,6 @@ export const createBashParameters = Type.Object({
       description: "Additional environment variables for the command.",
     }),
   ),
-  timeout: Type.Optional(
-    Type.Number({
-      description: "Timeout in seconds. The task is killed (exit code 124) if it exceeds this.",
-    }),
-  ),
 });
 
 export type CreateBashParams = Static<typeof createBashParameters>;
@@ -74,7 +69,6 @@ export const createBashTool: ToolDefinition<typeof createBashParameters, CreateB
       params.command,
       cwd,
       params.env,
-      params.timeout,
     );
 
     return {

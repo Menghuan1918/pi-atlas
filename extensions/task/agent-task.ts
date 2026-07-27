@@ -332,9 +332,6 @@ const createAgentParameters = Type.Object({
   cwd: Type.Optional(
     Type.String({ description: "Working directory (default: current cwd)" }),
   ),
-  tools: Type.Optional(
-    Type.Array(Type.String(), { description: "Tools to enable for the agent" }),
-  ),
 });
 
 type CreateAgentParams = Static<typeof createAgentParameters>;
@@ -397,7 +394,7 @@ export const createAgentTool: ToolDefinition<typeof createAgentParameters, Creat
 
     // Resolve agent definition (if specified)
     let model = resolveModelFromTier((params.model_tier ?? "quality") as ModelTier);
-    let tools = params.tools;
+    let tools: string[] | undefined;
     let effectivePrompt = params.prompt;
 
     if (params.agent) {
@@ -421,7 +418,7 @@ export const createAgentTool: ToolDefinition<typeof createAgentParameters, Creat
         model = resolveModelFromTier(agentInfo.modelTier);
       }
       model = model ?? agentInfo.model;
-      tools = tools ?? agentInfo.tools;
+      tools = agentInfo.tools;
       effectivePrompt = wrapPrompt(params.prompt, agentInfo);
     }
 
