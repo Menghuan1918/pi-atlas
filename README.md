@@ -42,6 +42,23 @@ Single tool that asks the user questions and blocks for answers:
 - **Session-level timeout** — per-session config at `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` (`{"timeout": 0}` where 0 = infinite wait). Re-read on every call; other extensions can overwrite the file to change the timeout mid-session.
 - **Non-interactive fallback** — returns an error in print/json modes.
 
+### WebSearch Extension (`extensions/websearch/`)
+
+Single tool that searches the web for current/real-time information:
+
+| Tool | Description |
+|------|-------------|
+| `WebSearch` | Search the web (version numbers, news, recent events). Returns a concise answer with source URLs. |
+
+**Key features:**
+- **Provider-agnostic** — available regardless of the active model/provider. On call, the query is routed through macaron's Anthropic endpoint, which performs a **server-side** web search and returns the model's answer.
+- **No search logic in the plugin** — the search is executed by the macaron cloud; the extension only relays the query and collects the answer.
+- **Domain filtering** — optional `allowed_domains` / `blocked_domains` passed as soft constraints.
+- **Dynamic config** — macaron credentials (apiKey + baseUrl) are resolved from the host model registry at call time; no hardcoded keys, no `models.json` change required.
+- **Graceful failure** — unconfigured provider or network errors return an `isError` result instead of throwing.
+
+**Requires** the `macaron` provider to be configured (apiKey + baseUrl) in `~/.pi/agent/models.json`.
+
 ### Bash Timeout Extension (`extensions/bash-timeout/`)
 
 Injects default timeouts for the built-in `bash` tool via two event handlers:
@@ -62,6 +79,7 @@ No tools or configuration — purely passive interception. Zero overhead when an
 ln -s /path/to/pi-atlas/extensions/task ~/.pi/agent/extensions/task
 ln -s /path/to/pi-atlas/extensions/askuser ~/.pi/agent/extensions/askuser
 ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-timeout
+ln -s /path/to/pi-atlas/extensions/websearch ~/.pi/agent/extensions/websearch
 ```
 
 ### Via settings.json
@@ -149,6 +167,9 @@ extensions/
 └── bash-timeout/
     ├── index.ts              # Extension entry — tool_call + tool_result handlers
     └── detect.ts            # Search command detection (regex + shell-quote)
+└── websearch/
+    ├── index.ts              # Extension entry — registers the WebSearch tool
+    └── search.ts             # macaron server-side search backend (config + stream)
 ```
 
 ## License
