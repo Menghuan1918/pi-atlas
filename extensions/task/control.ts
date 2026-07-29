@@ -149,7 +149,7 @@ function formatLiveStatus(tasks: Task[], sessionId: string): string {
 }
 
 export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTaskDetails> = {
-  name: "AwaitTask",
+  name: "await_task",
   label: "Await Task",
   description:
     "Wait for one or more background tasks to finish. Returns each task's status, exit code, and output. If no taskIds are given, waits for all running tasks.",
@@ -305,7 +305,7 @@ const cancelTaskParameters = Type.Object({
 type CancelTaskParams = Static<typeof cancelTaskParameters>;
 
 export const cancelTaskTool: ToolDefinition<typeof cancelTaskParameters> = {
-  name: "CancelTask",
+  name: "cancel_task",
   label: "Cancel Task",
   description: "Cancel a running background task by killing its process tree.",
   parameters: cancelTaskParameters,
@@ -357,7 +357,7 @@ function formatTaskSummary(task: Task): string {
 }
 
 export const listTaskTool: ToolDefinition<typeof listTaskParameters> = {
-  name: "ListTask",
+  name: "list_task",
   label: "List Tasks",
   description: "List all tasks (running and finished) in the current session.",
   parameters: listTaskParameters,
@@ -401,7 +401,7 @@ const watchTaskParameters = Type.Object({
 type WatchTaskParams = Static<typeof watchTaskParameters>;
 
 export const watchTaskTool: ToolDefinition<typeof watchTaskParameters> = {
-  name: "WatchTask",
+  name: "watch_task",
   label: "Watch Task",
   description:
     "View the current output and status of a background task. For running tasks, returns a live snapshot of accumulated output.",

@@ -42,5 +42,5 @@ export function clientDeclares(clientMeta: unknown, key: string): boolean {
  * attempted call fails as "not found" — and no `_ask_user` request is ever sent.
  */
 export function askUserExcludeToolsResolver(clientMeta: unknown): string[] {
-  return clientDeclares(clientMeta, VENDOR_CAPABILITIES.askUser) ? [] : ["AskUser"];
+  return clientDeclares(clientMeta, VENDOR_CAPABILITIES.askUser) ? [] : ["ask_user"];
 }

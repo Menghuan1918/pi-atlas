@@ -37,14 +37,14 @@ export interface CreateBashDetails {
 }
 
 export const createBashTool: ToolDefinition<typeof createBashParameters, CreateBashDetails> = {
-  name: "CreateBash",
+  name: "create_bash",
   label: "Create Bash Task",
   description:
-    "Run a bash command in the background. Returns immediately with a task ID. Use AwaitTask to wait for completion, WatchTask to check output, or CancelTask to stop it.",
+    "Run a bash command in the background. Returns immediately with a task ID. Use await_task to wait for completion, watch_task to check output, or cancel_task to stop it.",
   promptSnippet: "Run a bash command in the background (returns task ID immediately)",
   promptGuidelines: [
-    "Use CreateBash for long-running commands (builds, tests, servers) so you can continue working while they run.",
-    "After creating a task, always call AwaitTask before relying on its output — the task runs asynchronously.",
+    "Use create_bash for long-running commands (builds, tests, servers) so you can continue working while they run.",
+    "After creating a task, always call await_task before relying on its output — the task runs asynchronously.",
   ],
   parameters: createBashParameters,
   async execute(

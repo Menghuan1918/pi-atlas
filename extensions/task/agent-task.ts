@@ -343,19 +343,19 @@ interface CreateAgentDetails {
 }
 
 export const createAgentTool: ToolDefinition<typeof createAgentParameters, CreateAgentDetails> = {
-  name: "CreateAgent",
+  name: "create_agent",
   label: "Create Agent Task",
   description:
     "Launch a background agent task that runs a pi sub-process with the given prompt. " +
-    "Returns immediately with a task ID. Use AwaitTask to wait for completion " +
+    "Returns immediately with a task ID. Use await_task to wait for completion " +
     "(agent tasks may take long — use the default timeout).\n\n" +
     "Available agents:\n" +
     formatAgentCatalog(Object.values(BUILTIN_AGENTS)),
   promptSnippet: "Run a background agent task (returns task ID immediately)",
   promptGuidelines: [
-    "Use CreateAgent to delegate work to a sub-agent that runs independently while you continue.",
-    "After creating an agent task, call AwaitTask before relying on its output — the task runs asynchronously.",
-    "Agent tasks run in isolated context with their own session; use ResumeTask to continue from a previous agent's output.",
+    "Use create_agent to delegate work to a sub-agent that runs independently while you continue.",
+    "After creating an agent task, call await_task before relying on its output — the task runs asynchronously.",
+    "Agent tasks run in isolated context with their own session; use resume_task to continue from a previous agent's output.",
   ],
   parameters: createAgentParameters,
   async execute(
@@ -466,7 +466,7 @@ interface ResumeTaskDetails {
 }
 
 export const resumeTaskTool: ToolDefinition<typeof resumeTaskParameters, ResumeTaskDetails> = {
-  name: "ResumeTask",
+  name: "resume_task",
   label: "Resume Agent Task",
   description:
     "Resume a finished agent task by restoring its session history and sending " +
@@ -474,7 +474,7 @@ export const resumeTaskTool: ToolDefinition<typeof resumeTaskParameters, ResumeT
     "(it remembers everything). Only agent tasks can be resumed (not bash tasks).",
   promptSnippet: "Continue a finished agent task with full session history",
   promptGuidelines: [
-    "ResumeTask restores the previous agent's full session history and sends a new prompt — the agent remembers its prior conversation.",
+    "resume_task restores the previous agent's full session history and sends a new prompt — the agent remembers its prior conversation.",
     "The previous task must be in a terminal state (completed, failed, or cancelled).",
   ],
   parameters: resumeTaskParameters,
@@ -518,7 +518,7 @@ export const resumeTaskTool: ToolDefinition<typeof resumeTaskParameters, ResumeT
         content: [
           {
             type: "text",
-            text: `Task ${params.taskId} is still running. Use AwaitTask or CancelTask first.`,
+            text: `Task ${params.taskId} is still running. Use await_task or cancel_task first.`,
           },
         ],
         details: { taskId: "", parentId: params.taskId, status: "failed" },

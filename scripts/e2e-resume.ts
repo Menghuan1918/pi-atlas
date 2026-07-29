@@ -1,7 +1,7 @@
 /**
- * E2E test: CreateAgent → save → ResumeTask with REAL pi.
+ * E2E test: create_agent → save → resume_task with REAL pi.
  *
- * Verifies that ResumeTask restores the sub-agent's session history
+ * Verifies that resume_task restores the sub-agent's session history
  * (the sub-agent "remembers" the secret from the first turn).
  *
  * Run: npx tsx scripts/e2e-resume.ts
@@ -43,11 +43,11 @@ const ctx = {
   cwd: process.cwd(),
 } as unknown as ExtensionContext;
 
-console.log("\nE2E: CreateAgent → save → ResumeTask (real pi)\n");
+console.log("\nE2E: create_agent → save → resume_task (real pi)\n");
 
 try {
   // Step 1: Create an agent that remembers a secret word.
-  console.log("Step 1: CreateAgent — tell sub-agent a secret...");
+  console.log("Step 1: create_agent — tell sub-agent a secret...");
   const task1 = taskManager.createAgentTask(
     sessionId,
     "Remember the secret word PINEAPPLE. Reply with exactly: OK noted",
@@ -66,7 +66,7 @@ try {
   console.log(`  sessionFile: ${savedTask.sessionFile}`);
 
   // Step 2: Resume and ask for the secret.
-  console.log("\nStep 2: ResumeTask — ask the sub-agent for the secret...");
+  console.log("\nStep 2: resume_task — ask the sub-agent for the secret...");
   const resumeResult = await resumeTaskTool.execute(
     "e2e",
     { taskId: task1.id, prompt: "What was the secret word I told you? Reply with just the word." },

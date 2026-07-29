@@ -160,7 +160,7 @@ export function toolUseTurnEvents(filePath: string): AssistantMessageEvent[] {
 
 /** Events for a turn that calls the pi-atlas `Target` tool with the given action/args, then stops with toolUse. */
 export function targetToolTurnEvents(action: string, args: Record<string, unknown> = {}): AssistantMessageEvent[] {
-  const toolCall: ToolCall = { type: "toolCall", id: "tc-target", name: "Target", arguments: { action, ...args } };
+  const toolCall: ToolCall = { type: "toolCall", id: "tc-target", name: "target", arguments: { action, ...args } };
   const msg = makeAssistantMessage([{ type: "text", text: "Managing target." }, toolCall], "toolUse");
   return [
     { type: "start", partial: msg },
@@ -185,7 +185,7 @@ export function targetScript(steps: Array<{ action: string; args?: Record<string
 
 /** Events for a turn that calls the pi-atlas `AskUser` tool with the given questions, then stops with toolUse. */
 export function askUserToolTurnEvents(questions: unknown): AssistantMessageEvent[] {
-  const toolCall: ToolCall = { type: "toolCall", id: "tc-ask", name: "AskUser", arguments: { questions } };
+  const toolCall: ToolCall = { type: "toolCall", id: "tc-ask", name: "ask_user", arguments: { questions } };
   const msg = makeAssistantMessage([{ type: "text", text: "Asking the user." }, toolCall], "toolUse");
   return [
     { type: "start", partial: msg },

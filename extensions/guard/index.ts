@@ -43,7 +43,7 @@ export default function guardExtension(pi: ExtensionAPI): void {
   // Fires before the tool executes; AskUser blocks the turn, so this never
   // overlaps with the `agent_settled` session-end notification below.
   pi.on("tool_call", (event, ctx) => {
-    if (event.toolName === "AskUser") void notify(ctx, "askUser");
+    if (event.toolName === "ask_user") void notify(ctx, "askUser");
   });
 
   // ── turn_end: delegate to task guard's onTurnEnd ────────────────────

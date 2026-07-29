@@ -1,5 +1,5 @@
 /**
- * E2E: CancelTask — start a long-running subagent, cancel it mid-stream.
+ * E2E: cancel_task — start a long-running subagent, cancel it mid-stream.
  * Run: npx tsx scripts/e2e-cancel.ts
  */
 import { mkdtempSync, rmSync } from "node:fs";
@@ -22,7 +22,7 @@ const savedArgv1 = process.argv[1];
 process.argv[1] = "/nonexistent/path/to/pi";
 
 try {
-  console.log("E2E: CancelTask (real pi RPC mode)\n");
+  console.log("E2E: cancel_task (real pi RPC mode)\n");
 
   // Start a long-running agent task (will take a while to complete)
   const task = taskManager.createAgentTask(

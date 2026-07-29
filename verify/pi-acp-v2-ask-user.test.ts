@@ -198,12 +198,12 @@ function testExcludeResolver(): void {
   console.log("askUserExcludeToolsResolver");
   const declared = { _ask_user: {} };
   const undeclared = {};
-  check(askUserExcludeToolsResolver(declared).includes("AskUser") === false, "declared → AskUser NOT excluded");
+  check(askUserExcludeToolsResolver(declared).includes("ask_user") === false, "declared → ask_user NOT excluded");
   check(askUserExcludeToolsResolver(declared).length === 0, "declared → empty exclude list");
   const excl = askUserExcludeToolsResolver(undeclared);
-  check(excl.includes("AskUser"), "undeclared → AskUser excluded");
-  check(excl.length === 1 && excl[0] === "AskUser", "undeclared → only AskUser excluded");
-  check(askUserExcludeToolsResolver(undefined).includes("AskUser"), "missing clientMeta → excluded");
+  check(excl.includes("ask_user"), "undeclared → ask_user excluded");
+  check(excl.length === 1 && excl[0] === "ask_user", "undeclared → only ask_user excluded");
+  check(askUserExcludeToolsResolver(undefined).includes("ask_user"), "missing clientMeta → excluded");
   // Consistency with clientDeclares.
   check(clientDeclares(declared, VENDOR_CAPABILITIES.askUser) === true, "clientDeclares agrees: declared");
   check(clientDeclares(undeclared, VENDOR_CAPABILITIES.askUser) === false, "clientDeclares agrees: undeclared");

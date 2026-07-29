@@ -283,7 +283,7 @@ export class TaskManager {
     // Build pi CLI arguments (--mode rpc, no -p, no prompt as positional arg).
     const args: string[] = ["--mode", "rpc"];
     args.push("--session-dir", options.sessionDir);
-    args.push("--exclude-tools", "AskUser");
+    args.push("--exclude-tools", "ask_user");
     if (options.resumeSid) {
       args.push("--session", options.resumeSid);
     }

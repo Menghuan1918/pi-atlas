@@ -24,12 +24,12 @@ process.argv[1] = "/nonexistent/path/to/pi";
 try {
   console.log("E2E: Nested subagent (depth 0 → 1)\n");
 
-  // The prompt instructs the subagent to use CreateAgent to spawn a nested subagent.
+  // The prompt instructs the subagent to use create_agent to spawn a nested subagent.
   const task = taskManager.createAgentTask(
     sessionId,
-    "Use the CreateAgent tool to create a nested agent with the prompt: " +
+    "Use the create_agent tool to create a nested agent with the prompt: " +
     "'Reply with exactly: NESTED_DEEP_RESULT'. " +
-    "Then use AwaitTask to wait for it. " +
+    "Then use await_task to wait for it. " +
     "Finally, reply with the nested agent's output prefixed with PARENT_GOT_: " +
     "for example, if the nested agent said FOO, reply with PARENT_GOT_FOO.",
     { cwd: process.cwd(), sessionDir, depth: 0 },

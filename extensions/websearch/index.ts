@@ -60,7 +60,7 @@ export default function webSearchExtension(pi: ExtensionAPI): void {
 				const message = err instanceof Error ? err.message : String(err);
 				return {
 					isError: true,
-					content: [{ type: "text", text: `WebSearch failed: ${message}` }],
+					content: [{ type: "text", text: `web_search failed: ${message}` }],
 					details: undefined,
 				};
 			}

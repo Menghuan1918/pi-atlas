@@ -24,16 +24,16 @@ Background task system unifying bash and agent execution. Seven tools:
 
 | Tool | Description |
 |------|-------------|
-| `CreateBash` | Run a shell command in the background. Returns immediately with a task ID. |
-| `CreateAgent` | Spawn a pi sub-process as a background agent task. Returns immediately with a task ID. Built-in agents: `explorer`, `code-reviewer`, `general` (use `general` for custom behavior). |
-| `AwaitTask` | Block until specified tasks finish. Default timeout 3600s; timeout does NOT cancel tasks. While waiting, streams a live status showing each running task's bash output tail (or the sub-agent's last action). |
-| `CancelTask` | Kill a running task's process tree (SIGTERM → 5s → SIGKILL). |
-| `ResumeTask` | Continue a finished agent task in a new sub-process. Bash tasks cannot be resumed. |
-| `ListTask` | List all tasks (running and finished) in the current session. |
-| `WatchTask` | View the current output and status of a task. |
+| `create_bash` | Run a shell command in the background. Returns immediately with a task ID. |
+| `create_agent` | Spawn a pi sub-process as a background agent task. Returns immediately with a task ID. Built-in agents: `explorer`, `code-reviewer`, `general` (use `general` for custom behavior). |
+| `await_task` | Block until specified tasks finish. Default timeout 3600s; timeout does NOT cancel tasks. While waiting, streams a live status showing each running task's bash output tail (or the sub-agent's last action). |
+| `cancel_task` | Kill a running task's process tree (SIGTERM → 5s → SIGKILL). |
+| `resume_task` | Continue a finished agent task in a new sub-process. Bash tasks cannot be resumed. |
+| `list_task` | List all tasks (running and finished) in the current session. |
+| `watch_task` | View the current output and status of a task. |
 
 Key features:
-- **Agent presets** — three built-in agents (`explorer`, `code-reviewer`, `general`); the list is injected into the CreateAgent tool description.
+- **Agent presets** — three built-in agents (`explorer`, `code-reviewer`, `general`); the list is injected into the create_agent tool description.
 - **Prompt wrapping** — agent `prefix`/`suffix` wrap the task prompt: `prefix + "\n\n" + prompt + "\n\n" + suffix`.
 - **Session-level isolation** — tasks are scoped per session, persisted to `~/.pi/atlas/sessions/<sessionId>/task/`.
 - **Output truncation** — tail-kept at 50KB / 2000 lines; full output saved to a file when truncated.
@@ -41,13 +41,13 @@ Key features:
 - **Nesting depth control** — `PI_ATLAS_TASK_DEPTH` env var limits nested agent tasks (default max: 3).
 - **Usage tracking** — agent tasks accumulate token/cost stats from the sub-process.
 
-### AskUser (`extensions/askuser/`)
+### ask_user (`extensions/askuser/`)
 
 Single tool that asks the user questions and blocks for answers:
 
 | Tool | Description |
 |------|-------------|
-| `AskUser` | Ask one or more questions (select / input). Batch supported. |
+| `ask_user` | Ask one or more questions (select / input). Batch supported. |
 
 Key features:
 - **select** — single choice from options, with an "Other (free input)" fallback for custom answers. In TUI mode, selecting "Other" opens an inline editor directly (no separate dialog).
@@ -85,7 +85,7 @@ Passive extension (no tools) that injects default timeouts for the built-in `bas
   - **20 s** for search commands (`find`, `grep`, `rg`, `ag`, `ack`, `fd`, `locate`) — detected via regex pre-filter + `shell-quote` parsing.
   - **120 s** for everything else.
   - Explicit timeouts from the caller are always respected.
-- **`tool_result`** — when bash exits due to timeout, replaces the error message with a hint to use `CreateBash` for long-running commands.
+- **`tool_result`** — when bash exits due to timeout, replaces the error message with a hint to use `create_bash` for long-running commands.
 
 Purely passive interception — zero overhead when an explicit timeout is provided.
 
@@ -115,7 +115,7 @@ On `agent_settled`, guards run in priority order:
 3. **Target auto-continue** — if active, inject a continuation message with a completion audit.
 4. **Otherwise (truly idle)** — send a Feishu "session ended" notification.
 
-A Feishu notification is also sent when the `AskUser` tool is invoked ("waiting for input"). Notifications are suppressed in subagent sessions (`PI_ATLAS_TASK_DEPTH > 0`).
+A Feishu notification is also sent when the `ask_user` tool is invoked ("waiting for input"). Notifications are suppressed in subagent sessions (`PI_ATLAS_TASK_DEPTH > 0`).
 
 Feishu config is global (not per session) at `~/.pi/atlas/notify.json`:
 
@@ -191,7 +191,7 @@ ln -s /path/to/pi-atlas/extensions/guard        ~/.pi/agent/extensions/guard
 
 **Feishu notifications (guard).** Create `~/.pi/atlas/notify.json` with your webhook (see the Guard section above). Without it, notifications are silently disabled.
 
-**AskUser timeout.** `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` is created at `session_start` with `{"timeout": 0}` (0 = wait indefinitely). While `goal`/auto-continue is active, the timeout is capped at 60s so an unanswered question can't stall the autonomous loop. The file is re-read on every call, so other extensions can overwrite it mid-session.
+**ask_user timeout.** `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` is created at `session_start` with `{"timeout": 0}` (0 = wait indefinitely). While `goal`/auto-continue is active, the timeout is capped at 60s so an unanswered question can't stall the autonomous loop. The file is re-read on every call, so other extensions can overwrite it mid-session.
 
 **Agent nesting depth.** Set `PI_ATLAS_TASK_DEPTH` in the environment. The top-level session defaults to 0; each spawned agent increments by 1. Tasks exceeding `MAX_AGENT_DEPTH` (default 3) are rejected.
 

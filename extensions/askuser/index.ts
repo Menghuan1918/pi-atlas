@@ -84,7 +84,7 @@ export default function askUserExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "AskUser",
+		name: "ask_user",
 		label: "Ask User",
 		description:
 			"Ask the user one or more questions and block for their answers. " +
@@ -92,10 +92,10 @@ export default function askUserExtension(pi: ExtensionAPI): void {
 			"Use this when you need information or a decision from the user that you " +
 			"cannot infer yourself.",
 		promptSnippet:
-			"AskUser: ask the user questions (select/input) and wait for answers",
+			"ask_user: ask the user questions (select/input) and wait for answers",
 		promptGuidelines: [
-			"Prefer AskUser only when you genuinely need user input or a decision you cannot reasonably infer.",
-			"Batch related questions into a single AskUser call rather than calling it repeatedly.",
+			"Prefer ask_user only when you genuinely need user input or a decision you cannot reasonably infer.",
+			"Batch related questions into a single ask_user call rather than calling it repeatedly.",
 		],
 		parameters: AskUserSchema,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

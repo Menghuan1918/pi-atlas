@@ -8,9 +8,9 @@ pi coding agent 的 TypeScript 扩展集合（task 异步任务管理 + askuser 
 extensions/
 ├── shared/
 │   └── atlas-paths.ts        # 所有扩展共享的路径辅助
-├── task/                     # 后台任务系统（CreateBash / CreateAgent / AwaitTask …）
-├── askuser/                  # AskUser 工具（select / input）
-├── target/                   # 目标管理（Target 工具 + /goal 命令）
+├── task/                     # 后台任务系统（create_bash / create_agent / await_task …）
+├── askuser/                  # ask_user 工具（select / input）
+├── target/                   # 目标管理（target 工具 + /goal 命令）
 └── guard/                    # agent_settled guard 协调器（task + target 优先级）+ 飞书通知
 ```
 
@@ -125,12 +125,12 @@ Escape (aborted)  → autoContinue=false（与 /goal off 相同）
 
 实现见 `extensions/guard/notify.ts`，在两个时机发送精简卡片（pwd 末两段 + 「打开会话」按钮）：
 
-1. **AskUser**：监听 `tool_call`，`toolName === "AskUser"` 时通知（工具执行前触发，AskUser 阻塞 turn，与会话结束通知不冲突）。
+1. **ask_user**：监听 `tool_call`，`toolName === "ask_user"` 时通知（工具执行前触发，ask_user 阻塞 turn，与会话结束通知不冲突）。
 2. **会话结束**：`agent_settled` 中当 Escape / 后台任务 / auto-continue 三个 guard **均不注入**（即 auto-continue 未激活、无运行中任务、非中断）时通知——agent 真正交还控制权。
 
 排除条件（满足任一则不通知）：
-- **subagent**：`PI_ATLAS_TASK_DEPTH > 0`（与 task 扩展判定子代理一致，由 CreateAgent spawn 时注入）。
-- **会触发 guard 续跑**：仅对「会话结束」生效——auto-continue 激活期间持续续跑，零通知，直到目标完成、agent 真正空闲时通知一次。AskUser 不属此类，即便在 auto-continue 运行中也照样通知。
+- **subagent**：`PI_ATLAS_TASK_DEPTH > 0`（与 task 扩展判定子代理一致，由 create_agent spawn 时注入）。
+- **会触发 guard 续跑**：仅对「会话结束」生效——auto-continue 激活期间持续续跑，零通知，直到目标完成、agent 真正空闲时通知一次。ask_user 不属此类，即便在 auto-continue 运行中也照样通知。
 
 > 通知与运行模式无关（tui / rpc / print / json 均触发）——pi-web 以 `rpc` 模式运行主会话，按模式过滤会漏掉 web 端通知。
 

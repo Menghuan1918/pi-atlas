@@ -26,7 +26,7 @@ function buildGuardMessage(tasks: Task[]): string {
     "⚠️ You have background tasks still running:",
     ...lines,
     "",
-    "You must use AwaitTask to wait for their completion or CancelTask to cancel them before proceeding.",
+    "You must use await_task to wait for their completion or cancel_task to cancel them before proceeding.",
   ].join("\n");
 }
 

@@ -85,7 +85,7 @@ interface TargetToolDetails {
 
 export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetails> =
   {
-    name: "Target",
+    name: "target",
     label: "Target",
     description:
       "Manage targets — a unified goal and todo system. " +
@@ -97,12 +97,12 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
     promptSnippet:
       "Set primary target, add/update targets, full overwrite, or list all targets",
     promptGuidelines: [
-      "Use Target(action: 'set', text: '...') to define the primary goal — what the user ultimately wants achieved.",
-      "Use Target(action: 'add', text: '...') to break the goal into trackable sub-tasks.",
-      "Use Target(action: 'update_targets', text: '...', secondary: [{text: '...', status: '...'}, ...]) to replace all targets at once. Omit text to update only secondary targets (existing primary is preserved).",
-      "Use Target(action: 'update', id: <id>, status: 'completed') to mark a target done. For id 0, this also stops auto-continue. status is optional — you can also update just text or note.",
-      "Use Target(action: 'update', id: 0, status: 'failed', note: '...') if the goal cannot be achieved.",
-      "Use Target(action: 'list') to review all targets and their current status.",
+      "Use target(action: 'set', text: '...') to define the primary goal — what the user ultimately wants achieved.",
+      "Use target(action: 'add', text: '...') to break the goal into trackable sub-tasks.",
+      "Use target(action: 'update_targets', text: '...', secondary: [{text: '...', status: '...'}, ...]) to replace all targets at once. Omit text to update only secondary targets (existing primary is preserved).",
+      "Use target(action: 'update', id: <id>, status: 'completed') to mark a target done. For id 0, this also stops auto-continue. status is optional — you can also update just text or note.",
+      "Use target(action: 'update', id: 0, status: 'failed', note: '...') if the goal cannot be achieved.",
+      "Use target(action: 'list') to review all targets and their current status.",
     ],
     parameters: targetParameters,
 

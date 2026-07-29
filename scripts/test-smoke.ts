@@ -225,7 +225,7 @@ async function main(): Promise<void> {
     guard.onSettle({ type: "agent_settled" }, ctx);
     assert(injectedMessage !== null, "injected message when tasks running");
     assert(injectedMessage!.includes(task.id), "injected message contains task id");
-    assert(injectedMessage!.includes("AwaitTask"), "injected message mentions AwaitTask");
+    assert(injectedMessage!.includes("await_task"), "injected message mentions await_task");
 
     // User interrupt (stopReason "aborted") → guard must NOT re-inject
     injectedMessage = null;

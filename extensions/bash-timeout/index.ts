@@ -53,7 +53,7 @@ export default function bashTimeoutExtension(pi: ExtensionAPI): void {
 					text: [
 						captured || "(no output before timeout)",
 						"",
-						`Command timed out after ${secs}s. Use CreateBash to run long-running commands in the background.`,
+						`Command timed out after ${secs}s. Use create_bash to run long-running commands in the background.`,
 					].join("\n"),
 				},
 			],
