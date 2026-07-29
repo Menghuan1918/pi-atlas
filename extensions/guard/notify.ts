@@ -23,9 +23,6 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { getNotifyConfigPath } from "../shared/atlas-paths.js";
 
-/** Button jump target when `webUrl` is absent from config (not a secret). */
-const DEFAULT_WEB_URL = "https://pi-web.menghuan1918.com";
-
 export interface NotifyConfig {
   enabled: boolean;
   webhookUrl: string;
@@ -80,8 +77,7 @@ export function loadNotifyConfig(): NotifyConfig | null {
   if (!enabled) return null;
 
   const webhookSecret = typeof obj.webhookSecret === "string" ? obj.webhookSecret.trim() : "";
-  const rawWebUrl = typeof obj.webUrl === "string" ? obj.webUrl.trim() : "";
-  const webUrl = rawWebUrl || DEFAULT_WEB_URL;
+  const webUrl = typeof obj.webUrl === "string" ? obj.webUrl.trim() : ""; // empty → card omits the button
 
   return { enabled, webhookUrl, webhookSecret, webUrl };
 }
@@ -94,27 +90,31 @@ export function buildCard(
   webUrl: string,
 ): Record<string, unknown> {
   const meta = CARD_META[type];
-  const buttonUrl = `${webUrl}/?session=${encodeURIComponent(sessionId)}`;
+  const elements: Record<string, unknown>[] = [
+    { tag: "div", text: { tag: "lark_md", content: `**📁 目录**\n${lastTwoDirs(cwd)}` } },
+  ];
+  // Omit the "open session" button entirely when no webUrl is configured —
+  // there is no hardcoded default (keeps personal domains out of the source).
+  if (webUrl) {
+    elements.push({
+      tag: "action",
+      actions: [
+        {
+          tag: "button",
+          text: { tag: "plain_text", content: "打开会话" },
+          type: "primary",
+          url: `${webUrl}/?session=${encodeURIComponent(sessionId)}`,
+        },
+      ],
+    });
+  }
   return {
     config: { wide_screen_mode: true },
     header: {
       title: { tag: "plain_text", content: `${meta.emoji} ${meta.title}` },
       template: meta.template,
     },
-    elements: [
-      { tag: "div", text: { tag: "lark_md", content: `**📁 目录**\n${lastTwoDirs(cwd)}` } },
-      {
-        tag: "action",
-        actions: [
-          {
-            tag: "button",
-            text: { tag: "plain_text", content: "打开会话" },
-            type: "primary",
-            url: buttonUrl,
-          },
-        ],
-      },
-    ],
+    elements,
   };
 }
 

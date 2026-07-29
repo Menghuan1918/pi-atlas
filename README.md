@@ -1,12 +1,26 @@
 # pi-atlas
 
-Asynchronous task management and user interaction extensions for [pi](https://github.com/earendil-works/pi-mono) coding agent.
+> 中文文档：[README_CN.md](README_CN.md)
 
-## Extensions
+TypeScript extensions for the [pi](https://github.com/earendil-works/pi-mono) coding agent — asynchronous task management, user interaction, goal tracking, auto-continue, web search, and Feishu notifications.
 
-### Task Extension (`extensions/task/`)
+## 介绍
 
-Background task system with unified bash and agent execution. Seven tools:
+pi-atlas is a collection of independent pi extensions. Each extension is a self-contained directory under `extensions/` and can be installed individually. They share a single runtime data root at `~/.pi/atlas/` (overridable via `PI_ATLAS_DIR`), scoped per session under `~/.pi/atlas/sessions/<sessionId>/`.
+
+| Extension | Type | What it does |
+|-----------|------|--------------|
+| `task` | tools + guard | Background bash/agent task system (7 tools) |
+| `askuser` | tool | Ask the user questions and block for answers |
+| `target` | tool + command | Goal/todo management + `/goal` auto-continue |
+| `bash-timeout` | passive | Default timeouts for the built-in `bash` tool |
+| `websearch` | tool | Server-side web search via an Anthropic-compatible provider |
+| `guard` | passive | Coordinates `agent_settled` + Feishu notifications |
+| `pi-acp-v2` | standalone server | Exposes pi as an ACP v2 agent over stdio (dev bridge, not a pi extension) |
+
+### Task (`extensions/task/`)
+
+Background task system unifying bash and agent execution. Seven tools:
 
 | Tool | Description |
 |------|-------------|
@@ -18,8 +32,8 @@ Background task system with unified bash and agent execution. Seven tools:
 | `ListTask` | List all tasks (running and finished) in the current session. |
 | `WatchTask` | View the current output and status of a task. |
 
-**Key features:**
-- **Agent presets** — three built-in agents (`explorer`, `code-reviewer`, `general`). The agent list is injected into the CreateAgent tool description.
+Key features:
+- **Agent presets** — three built-in agents (`explorer`, `code-reviewer`, `general`); the list is injected into the CreateAgent tool description.
 - **Prompt wrapping** — agent `prefix`/`suffix` wrap the task prompt: `prefix + "\n\n" + prompt + "\n\n" + suffix`.
 - **Session-level isolation** — tasks are scoped per session, persisted to `~/.pi/atlas/sessions/<sessionId>/task/`.
 - **Output truncation** — tail-kept at 50KB / 2000 lines; full output saved to a file when truncated.
@@ -27,7 +41,7 @@ Background task system with unified bash and agent execution. Seven tools:
 - **Nesting depth control** — `PI_ATLAS_TASK_DEPTH` env var limits nested agent tasks (default max: 3).
 - **Usage tracking** — agent tasks accumulate token/cost stats from the sub-process.
 
-### AskUser Extension (`extensions/askuser/`)
+### AskUser (`extensions/askuser/`)
 
 Single tool that asks the user questions and blocks for answers:
 
@@ -35,33 +49,37 @@ Single tool that asks the user questions and blocks for answers:
 |------|-------------|
 | `AskUser` | Ask one or more questions (select / input). Batch supported. |
 
-**Key features:**
+Key features:
 - **select** — single choice from options, with an "Other (free input)" fallback for custom answers. In TUI mode, selecting "Other" opens an inline editor directly (no separate dialog).
 - **input** — free-text input. In TUI mode, typing starts an inline editor immediately.
 - **TUI navigation** — in interactive mode, all questions are shown on one screen. Use ← → to switch between questions, ↑↓ to navigate options, Enter to confirm.
 - **Session-level timeout** — per-session config at `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` (`{"timeout": 0}` where 0 = infinite wait). Re-read on every call; other extensions can overwrite the file to change the timeout mid-session.
 - **Non-interactive fallback** — returns an error in print/json modes.
 
-### WebSearch Extension (`extensions/websearch/`)
+### Target (`extensions/target/`)
 
-Single tool that searches the web for current/real-time information:
+Unified goal and todo management that also drives auto-continue.
 
 | Tool | Description |
 |------|-------------|
-| `WebSearch` | Search the web (version numbers, news, recent events). Returns a concise answer with source URLs. |
+| `Target` | Manage targets: `set` primary, `add` secondary, `update` status, `update_targets` (overwrite all), `list`. |
 
-**Key features:**
-- **Provider-agnostic** — available regardless of the active model/provider. On call, the query is routed through macaron's Anthropic endpoint, which performs a **server-side** web search and returns the model's answer.
-- **No search logic in the plugin** — the search is executed by the macaron cloud; the extension only relays the query and collects the answer.
-- **Domain filtering** — optional `allowed_domains` / `blocked_domains` passed as soft constraints.
-- **Dynamic config** — macaron credentials (apiKey + baseUrl) are resolved from the host model registry at call time; no hardcoded keys, no `models.json` change required.
-- **Graceful failure** — unconfigured provider or network errors return an `isError` result instead of throwing.
+A **target** is either `primary` (id 0, drives auto-continue) or `secondary` (id 1+, for progress tracking). State persists per session to `~/.pi/atlas/sessions/<sessionId>/target/state.json`.
 
-**Requires** the `macaron` provider to be configured (apiKey + baseUrl) in `~/.pi/agent/models.json`.
+The `/goal` command (user-only) sets the primary target and toggles auto-continue:
 
-### Bash Timeout Extension (`extensions/bash-timeout/`)
+| Usage | Effect |
+|-------|--------|
+| `/goal <text>` | Set the primary target + activate auto-continue + send the goal immediately if idle |
+| `/goal on` | Re-activate auto-continue for the existing primary + resume immediately if idle |
+| `/goal off` | Turn off auto-continue (primary target retained) |
+| `/goal` | Show current status |
 
-Injects default timeouts for the built-in `bash` tool via two event handlers:
+When auto-continue is active, the `guard` extension re-injects a completion-audit message on each `agent_settled` until the primary target is marked `completed` or `failed`.
+
+### Bash Timeout (`extensions/bash-timeout/`)
+
+Passive extension (no tools) that injects default timeouts for the built-in `bash` tool via two event handlers:
 
 - **`tool_call`** — when no timeout is specified, injects a default:
   - **20 s** for search commands (`find`, `grep`, `rg`, `ag`, `ack`, `fd`, `locate`) — detected via regex pre-filter + `shell-quote` parsing.
@@ -69,71 +87,127 @@ Injects default timeouts for the built-in `bash` tool via two event handlers:
   - Explicit timeouts from the caller are always respected.
 - **`tool_result`** — when bash exits due to timeout, replaces the error message with a hint to use `CreateBash` for long-running commands.
 
-No tools or configuration — purely passive interception. Zero overhead when an explicit timeout is provided.
+Purely passive interception — zero overhead when an explicit timeout is provided.
 
-## Installation
+### WebSearch (`extensions/websearch/`)
 
-### Via symlink (development)
+Single tool that searches the web for current/real-time information:
 
-```bash
-ln -s /path/to/pi-atlas/extensions/task ~/.pi/agent/extensions/task
-ln -s /path/to/pi-atlas/extensions/askuser ~/.pi/agent/extensions/askuser
-ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-timeout
-ln -s /path/to/pi-atlas/extensions/websearch ~/.pi/agent/extensions/websearch
+| Tool | Description |
+|------|-------------|
+| `WebSearch` | Search the web (version numbers, news, recent events). Returns a concise answer with source URLs. |
+
+How it works:
+- The query is routed through the **`macaron`** provider's Anthropic-compatible `/v1/messages` endpoint, which executes a server-side `web_search` tool and returns the model's answer (with sources). The extension only relays the query and collects the answer — no search logic lives in the plugin.
+- **macaron credentials** (`apiKey` + `baseUrl`) are resolved from the host model registry at call time; no keys are hardcoded. The `macaron` provider must be configured in `~/.pi/agent/models.json`.
+- **Domain filtering** — optional `allowed_domains` / `blocked_domains` passed as soft constraints.
+- **Graceful failure** — an unconfigured provider or network error returns an `isError` result instead of throwing.
+
+> The server-side `web_search` convention is shared by other Anthropic-compatible search endpoints (e.g. DeepSeek's `/anthropic` endpoint), so wiring additional providers is straightforward. Today only `macaron` is wired and verified.
+
+### Guard (`extensions/guard/`)
+
+Passive extension (no tools) that coordinates the `agent_settled` event and sends Feishu notifications. It depends on the `task` and `target` extensions (it imports their managers/guards), so load all three together.
+
+On `agent_settled`, guards run in priority order:
+1. **Escape / aborted** (highest) — if the last assistant turn was aborted, disable target auto-continue and stop.
+2. **Background tasks** — if any background task is still running, inject a task reminder (skip the target guard).
+3. **Target auto-continue** — if active, inject a continuation message with a completion audit.
+4. **Otherwise (truly idle)** — send a Feishu "session ended" notification.
+
+A Feishu notification is also sent when the `AskUser` tool is invoked ("waiting for input"). Notifications are suppressed in subagent sessions (`PI_ATLAS_TASK_DEPTH > 0`).
+
+Feishu config is global (not per session) at `~/.pi/atlas/notify.json`:
+
+```json
+{
+  "enabled": true,
+  "webhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/<id>",
+  "webhookSecret": "<optional; required only if the webhook verifies signatures>",
+  "webUrl": "https://your-pi-web.example.com"
+}
 ```
 
-### Via settings.json
+- Missing file / `enabled: false` / empty `webhookUrl` → silent no-op (safe default; no secrets in source).
+- `webUrl` is optional — it sets the "open session" button target `${webUrl}/?session=<sessionId>`; when unset the card omits the button.
+- The config is re-read on every notification, so edits take effect without a restart.
+
+### pi-acp-v2 (`extensions/pi-acp-v2/`)
+
+**Not a pi extension** — a standalone stdio server that exposes pi as an [Agent Client Protocol v2](https://agentclientprotocol.com/) agent. It lets ACP v2-compatible clients (IDEs, editors) drive pi: `newSession` / `prompt` / `cancel` / `resume` / `close`, plus vendor extensions for fork/rewind and ask-user.
+
+Run it via the npm bin (it reads NDJSON from stdin, writes one JSON message per line to stdout):
+
+```bash
+npx pi-acp-v2
+# or, from the repo:
+npx tsx extensions/pi-acp-v2/server.ts
+```
+
+Set `PI_ACP_V2_FAKE_MODEL=1` to use a deterministic fake model (no LLM/auth/network) for conformance testing.
+
+## 安装
+
+### Prerequisites
+
+- The pi coding agent (`@earendil-works/pi-coding-agent`) and Node.js.
+- `npm install` in this repo to fetch dependencies (used by both the extensions and the `pi-acp-v2` bin).
+
+### Install the extensions
+
+Each extension is a directory under `extensions/`. Install the ones you want either by symlinking into pi's extensions dir (development) or by listing paths in `settings.json`.
+
+**Via symlink (development):**
+
+```bash
+ln -s /path/to/pi-atlas/extensions/task        ~/.pi/agent/extensions/task
+ln -s /path/to/pi-atlas/extensions/askuser     ~/.pi/agent/extensions/askuser
+ln -s /path/to/pi-atlas/extensions/target      ~/.pi/agent/extensions/target
+ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-timeout
+ln -s /path/to/pi-atlas/extensions/websearch    ~/.pi/agent/extensions/websearch
+ln -s /path/to/pi-atlas/extensions/guard        ~/.pi/agent/extensions/guard
+```
+
+**Via `settings.json`:**
 
 ```json
 {
   "extensions": [
     "/path/to/pi-atlas/extensions/task",
     "/path/to/pi-atlas/extensions/askuser",
-    "/path/to/pi-atlas/extensions/bash-timeout"
+    "/path/to/pi-atlas/extensions/target",
+    "/path/to/pi-atlas/extensions/bash-timeout",
+    "/path/to/pi-atlas/extensions/websearch",
+    "/path/to/pi-atlas/extensions/guard"
   ]
 }
 ```
 
-## Configuration
+> `guard` imports the `task` and `target` managers/guards, so install all three together.
 
-### AskUser timeout
+### Configure
 
-The config file is created at `session_start` at:
+**WebSearch — macaron provider.** Add the `macaron` provider (apiKey + baseUrl) to `~/.pi/agent/models.json`. WebSearch resolves credentials from this registry at call time; no change to the extension is needed.
 
-```
-~/.pi/atlas/sessions/<sessionId>/askuser/config.json
-```
+**Feishu notifications (guard).** Create `~/.pi/atlas/notify.json` with your webhook (see the Guard section above). Without it, notifications are silently disabled.
 
-```json
+**AskUser timeout.** `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` is created at `session_start` with `{"timeout": 0}` (0 = wait indefinitely). While `goal`/auto-continue is active, the timeout is capped at 60s so an unanswered question can't stall the autonomous loop. The file is re-read on every call, so other extensions can overwrite it mid-session.
+
+**Agent nesting depth.** Set `PI_ATLAS_TASK_DEPTH` in the environment. The top-level session defaults to 0; each spawned agent increments by 1. Tasks exceeding `MAX_AGENT_DEPTH` (default 3) are rejected.
+
+### Install pi-acp-v2 (for ACP clients)
+
+`pi-acp-v2` is an npm bin, not a symlinked extension. After `npm install`, point your ACP v2 client at the command:
+
+```jsonc
+// example ACP client config (stdio)
 {
-  "timeout": 0
+  "command": "npx",
+  "args": ["pi-acp-v2"]
 }
 ```
 
-- `0` — wait indefinitely (default).
-- `>0` — timeout in seconds. On timeout: select → `default` or `(no answer / timed out)`, input → `default` or `(no answer / timed out)`.
-
-While `goal`/auto-continue is active, the timeout is capped at **60s** (`min(configured, 60)`; `0`/infinite becomes 60s) so an unanswered question can't stall the autonomous loop — the agent proceeds with the fallback answer. This only ever *lowers* the configured timeout.
-
-The file is re-read on every `AskUser` call, so other extensions can overwrite it at any time to change the timeout dynamically.
-
-### Agent nesting depth
-
-Set `PI_ATLAS_TASK_DEPTH` in the environment. The top-level session defaults to 0; each spawned agent increments by 1. Tasks exceeding `MAX_AGENT_DEPTH` (default: 3) are rejected.
-
-### Agent presets
-
-Three built-in agents are always available:
-
-| Agent | Description | Tools |
-|------|-------------|-------|
-| `explorer` | Fast codebase recon returning compressed context | read, grep, find, ls, bash |
-| `code-reviewer` | Read-only code review against requirements and quality | read, grep, bash |
-| `general` | General-purpose, no special prompt — use for custom behavior | (all tools) |
-
-For custom agent behavior, use `general` and craft the task prompt directly — its `prefix`/`suffix` are empty, so the prompt you pass becomes the full instruction. You can also pass `model` / `cwd` to tailor it.
-
-Specifying a non-existent agent returns an error with the available agents list.
+Or run it directly: `npx tsx extensions/pi-acp-v2/server.ts`.
 
 ## Development
 
@@ -143,34 +217,7 @@ npm run typecheck   # tsc --noEmit
 npm test            # run all test suites
 ```
 
-### Project structure
-
-```
-extensions/
-├── shared/
-│   └── atlas-paths.ts        # Shared path helpers (~/.pi/atlas/sessions/<sid>/)
-├── task/
-│   ├── index.ts              # Extension entry — registers tools + events
-│   ├── types.ts              # Task / TaskUsage / TaskResult types
-│   ├── task-manager.ts       # Lifecycle, state machine, session isolation
-│   ├── persistence.ts        # ~/.pi/atlas/sessions/<sid>/task/ persistence
-│   ├── output-accumulator.ts # Bounded-memory output tracking + temp file spill
-│   ├── bash-task.ts          # CreateBash tool
-│   ├── agent-task.ts         # CreateAgent + ResumeTask tools + dynamic description builder
-│   ├── agents.ts             # Agent preset system — built-ins, discovery, prompt wrapping
-│   ├── control.ts            # AwaitTask / CancelTask / ListTask / WatchTask
-│   └── guard.ts              # agent_settled guard
-├── askuser/
-│   ├── index.ts              # Extension entry — registers AskUser tool
-│   ├── config.ts             # Per-session timeout config reader
-│   └── multi-question.ts     # TUI multi-question component (← → navigation + inline editor)
-└── bash-timeout/
-    ├── index.ts              # Extension entry — tool_call + tool_result handlers
-    └── detect.ts            # Search command detection (regex + shell-quote)
-└── websearch/
-    ├── index.ts              # Extension entry — registers the WebSearch tool
-    └── search.ts             # macaron server-side search backend (config + stream)
-```
+Tests live in `verify/` and `scripts/` and run directly via `tsx` (no test framework). Project structure mirrors the extension directories under `extensions/`.
 
 ## License
 

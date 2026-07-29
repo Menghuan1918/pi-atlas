@@ -141,10 +141,10 @@ Escape (aborted)  → autoContinue=false（与 /goal off 相同）
   "enabled": true,
   "webhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/<id>",
   "webhookSecret": "<可选，webhook 启用签名时填>",
-  "webUrl": "https://pi-web.menghuan1918.com"
+  "webUrl": "https://your-pi-web.example.com"
 }
 ```
 
 - 文件缺失 / `enabled:false` / `webhookUrl` 为空 → 静默不通知（安全默认，源码不含密钥）。
-- 每次通知时同步重读配置（用户改完即生效，无需重启）。`webUrl` 决定按钮跳转地址 `${webUrl}/?session=${sessionId}`。
+- 每次通知时同步重读配置（用户改完即生效，无需重启）。`webUrl` 可选，决定「打开会话」按钮跳转地址 `${webUrl}/?session=${sessionId}`；未配置时卡片不含该按钮。
 - 通知为 fire-and-forget（fetch 8s 超时、全程吞错写 stderr），失败绝不影响 guard 主流程。

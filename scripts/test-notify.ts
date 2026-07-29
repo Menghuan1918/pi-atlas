@@ -88,7 +88,7 @@ writeConfig({ webhookUrl: "https://x/hook" });
 const c1 = loadNotifyConfig();
 assert(c1?.enabled === true, "enabled defaults true when webhook set");
 assert(c1?.webhookSecret === "", "no secret → empty string");
-assert(c1?.webUrl === "https://pi-web.menghuan1918.com", "webUrl defaults when absent");
+assert(c1?.webUrl === "", "webUrl empty when absent (no hardcoded default)");
 writeConfig({ webhookUrl: "https://x/hook", webUrl: "https://custom.example.com" });
 assert(loadNotifyConfig()?.webUrl === "https://custom.example.com", "custom webUrl honored");
 
@@ -107,6 +107,11 @@ assert(button.type === "primary", "button type primary");
 assert(button.url === `https://w.example.com/?session=${sessionId}`, "button url has session id");
 const card2 = buildCard("sessionEnd", "/a/b", sessionId, "https://w.example.com");
 assert((card2.header as any).template === "blue", "sessionEnd template blue");
+const cardNoButton = buildCard("askUser", "/root/Code/pi-atlas", sessionId, "");
+assert(
+  (cardNoButton.elements as any[]).filter((e) => e.tag === "action").length === 0,
+  "no button when webUrl empty",
+);
 
 // ── sign ────────────────────────────────────────────────────────────
 assert(typeof sign("1700000000", "secret") === "string", "sign returns a string");
