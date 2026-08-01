@@ -19,7 +19,7 @@ import { taskManager } from "./task-manager.js";
 import type { Task, TaskResult, TaskStatus } from "./types.js";
 import { formatDuration } from "../shared/format-utils.js";
 
-const DEFAULT_AWAIT_TIMEOUT_S = 3600;
+const DEFAULT_CHECKPOINT_S = 300;
 
 /** Interval between live status updates during AwaitTask (ms). */
 const LIVE_UPDATE_INTERVAL_MS = 1000;
@@ -37,9 +37,9 @@ const awaitTaskParameters = Type.Object({
       description: "Specific task IDs to wait for. If omitted, waits for all running tasks.",
     }),
   ),
-  timeout: Type.Optional(
+  checkpoint: Type.Optional(
     Type.Number({
-      description: `Maximum time to wait in seconds (default ${DEFAULT_AWAIT_TIMEOUT_S}).`,
+      description: `Seconds to wait before returning a progress checkpoint (default ${DEFAULT_CHECKPOINT_S}s). Not a failure.`,
     }),
   ),
 });
@@ -48,7 +48,7 @@ type AwaitTaskParams = Static<typeof awaitTaskParameters>;
 
 interface AwaitTaskDetails {
   results: TaskResult[];
-  timedOut: boolean;
+  checkpoint: boolean;
 }
 
 function formatTaskResult(r: TaskResult): string {
@@ -186,8 +186,8 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
     }
 
     const lines: string[] = [];
-    if (details.timedOut) {
-      lines.push(theme.fg("warning", "⏱ Timed out — some tasks may still be running."));
+    if (details.checkpoint) {
+      lines.push(theme.fg("accent", "📊 Checkpoint — tasks still running."));
       lines.push("");
     }
     for (const r of details.results) {
@@ -218,8 +218,8 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
     ctx: ExtensionContext,
   ) {
     const sessionId = ctx.sessionManager.getSessionId();
-    const timeoutS = params.timeout ?? DEFAULT_AWAIT_TIMEOUT_S;
-    const timeoutMs = timeoutS * 1000;
+    const checkpointS = params.checkpoint ?? DEFAULT_CHECKPOINT_S;
+    const checkpointMs = checkpointS * 1000;
 
     // Determine which task IDs we are waiting for (for live status display).
     const taskIds: string[] =
@@ -237,7 +237,7 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
       const results = tasks.map(taskToResult);
       onUpdate({
         content: [{ type: "text" as const, text: formatLiveStatus(tasks, sessionId) }],
-        details: { results, timedOut: false },
+        details: { results, checkpoint: false },
       });
     };
 
@@ -251,17 +251,17 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
     }
 
     let results: TaskResult[];
-    let timedOut: boolean;
+    let checkpoint: boolean;
 
     try {
       const r = await taskManager.awaitTasks(
         sessionId,
         params.taskIds,
-        timeoutMs,
+        checkpointMs,
         signal,
       );
       results = r.results;
-      timedOut = r.timedOut;
+      checkpoint = r.timedOut;
     } finally {
       clearInterval(interval);
     }
@@ -274,7 +274,7 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
       if (tasks.length > 0) {
         onUpdate({
           content: [{ type: "text" as const, text: formatLiveStatus(tasks, sessionId) }],
-          details: { results: tasks.map(taskToResult), timedOut },
+          details: { results: tasks.map(taskToResult), checkpoint },
         });
       }
     }
@@ -283,13 +283,13 @@ export const awaitTaskTool: ToolDefinition<typeof awaitTaskParameters, AwaitTask
       ? results.map(formatTaskResult).join("\n\n")
       : "(no tasks to await)";
 
-    const text = timedOut
-      ? `Timed out after ${timeoutS}s. Some tasks may still be running.\n\n${summary}`
+    const text = checkpoint
+      ? `Checkpoint after ${checkpointS}s — some tasks are still running.\n\n${summary}`
       : `All awaited tasks finished.\n\n${summary}`;
 
     return {
       content: [{ type: "text" as const, text }],
-      details: { results, timedOut },
+      details: { results, checkpoint },
     };
   },
 };

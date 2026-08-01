@@ -348,7 +348,7 @@ export const createAgentTool: ToolDefinition<typeof createAgentParameters, Creat
   description:
     "Launch a background agent task that runs a pi sub-process with the given prompt. " +
     "Returns immediately with a task ID. Use AwaitTask to wait for completion " +
-    "(agent tasks may take long — use the default timeout).\n\n" +
+    "(agent tasks may take long — AwaitTask returns a progress checkpoint, not a failure).\n\n" +
     "Available agents:\n" +
     formatAgentCatalog(Object.values(BUILTIN_AGENTS)),
   promptSnippet: "Run a background agent task (returns task ID immediately)",
