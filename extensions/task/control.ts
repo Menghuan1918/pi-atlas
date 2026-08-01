@@ -39,7 +39,7 @@ const awaitTaskParameters = Type.Object({
   ),
   checkpoint: Type.Optional(
     Type.Number({
-      description: `Seconds to wait before returning a progress checkpoint (default ${DEFAULT_CHECKPOINT_S}s). Not a failure.`,
+      description: `Seconds to wait before returning a progress checkpoint (default ${DEFAULT_CHECKPOINT_S}s).`,
     }),
   ),
 });
