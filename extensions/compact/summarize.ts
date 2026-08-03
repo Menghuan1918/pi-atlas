@@ -88,6 +88,20 @@ export function fileListsFromOps(
 	return { readFiles, modifiedFiles };
 }
 
+/**
+ * Detect a degenerate/empty summary that would cause data loss if persisted
+ * (e.g. the model returned the empty template instead of summarizing a large
+ * conversation). For a substantial conversation, a real summary is non-trivial;
+ * the all-"(none)" template is ~230 chars with many "(none)" markers.
+ */
+export function isDegenerateSummary(summary: string, tokensBefore: number): boolean {
+	const s = summary.trim();
+	if (!s) return true;
+	if (tokensBefore <= 20000) return false; // small conversations aren't checked
+	const noneCount = (s.match(/\(none\)/g) ?? []).length;
+	return s.length < 400 || noneCount >= 4;
+}
+
 export interface PromptInputs {
 	conversationText: string;
 	previousSummary?: string;

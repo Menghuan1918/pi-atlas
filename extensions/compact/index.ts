@@ -10,18 +10,22 @@
  *
  * Design (Tier 1 / KISS, per `.workspace-docs/plans/08-03-compact-压缩插件.md`):
  *  - One handler: `session_before_compact` → returns `{ compaction: CompactionResult }`.
+ *  - Summarization uses **streaming** (`stream` + direct `text_end` event collection),
+ *    not `complete`/`.result()` — the most direct use of streaming transport, and
+ *    more robust on very large inputs than assembling from the `done` event.
  *  - No output-token cap (effectiveness first).
  *  - Secret redaction before the model sees the text.
- *  - On any failure → return `undefined` so pi falls back to its default compaction.
+ *  - Degenerate-summary guard: retry once; if still degenerate, fall back to pi's
+ *    default compaction rather than persisting a useless summary (data loss).
  *  - No commands, no config, no extra storage.
  *
  * `runCompaction` is exported and dependency-injected (`deps`) so the orchestration
- * can be unit-tested with a fake `complete` and a fake serializer, without a real
+ * can be unit-tested with a fake `summarize` and a fake serializer, without a real
  * model call or valid `AgentMessage`s.
  */
 
 import { uuidv7 } from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai/compat";
+import { stream } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
@@ -31,13 +35,14 @@ import {
 	buildUserMessage,
 	fileListsFromOps,
 	formatTargets,
+	isDegenerateSummary,
 	redactSecrets,
 } from "./summarize.js";
 
 /** Injectable dependencies for `runCompaction` (testability seam). */
 export interface CompactDeps {
-	/** The summarization model call (real: pi-ai `complete`; tests: a fake). */
-	complete: typeof complete;
+	/** The summarization call (real: pi-ai `stream` + direct text_end collection; tests: a fake). */
+	summarize: (model: unknown, context: unknown, options: unknown) => Promise<{ summary: string }>;
 	/** Builds the (already-redacted) conversation text from pi's AgentMessage[]. */
 	serializeText: (messages: SessionBeforeCompactEvent["preparation"]["messagesToSummarize"]) => string;
 }
@@ -93,10 +98,10 @@ export async function runCompaction(
 		reason,
 	});
 
-	try {
-		// No maxTokens cap — effectiveness first. cacheRetention "none" + fresh sessionId
-		// (the summary is a throwaway call, not part of the cached prefix).
-		const response = await deps.complete(
+	const summarizeOnce = async (): Promise<string> => {
+		// Streaming + direct text_end collection. No maxTokens cap (effectiveness
+		// first). cacheRetention "none" + fresh sessionId (throwaway call, not cached).
+		const { summary } = await deps.summarize(
 			model,
 			{
 				systemPrompt: buildSystemPrompt(),
@@ -117,15 +122,24 @@ export async function runCompaction(
 				sessionId: uuidv7(),
 			},
 		);
+		return summary;
+	};
 
-		const summary = response.content
-			.filter((c): c is { type: "text"; text: string } => c.type === "text")
-			.map((c) => c.text)
-			.join("\n")
-			.trim();
+	try {
+		let summary = await summarizeOnce();
 
-		if (!summary) {
-			if (!signal.aborted) ctx.ui.notify("compact: summary was empty; using default compaction", "warning");
+		// Guard against degenerate/empty summaries (e.g. the model returns the empty
+		// template instead of summarizing a large conversation). Retrying once handles
+		// transient flakes; if still degenerate, fall back to pi's default compaction
+		// rather than persisting a useless summary and losing the context.
+		if (isDegenerateSummary(summary, tokensBefore) && !signal.aborted) {
+			ctx.ui.notify("compact: degenerate summary, retrying…", "warning");
+			summary = await summarizeOnce();
+		}
+
+		if (!summary || isDegenerateSummary(summary, tokensBefore)) {
+			if (!signal.aborted)
+				ctx.ui.notify("compact: summary still degenerate/empty; using default compaction", "warning");
 			return;
 		}
 
@@ -134,7 +148,6 @@ export async function runCompaction(
 				summary,
 				firstKeptEntryId,
 				tokensBefore,
-				usage: response.usage,
 				details: { readFiles, modifiedFiles },
 			},
 		};
@@ -148,7 +161,19 @@ export async function runCompaction(
 
 /** Real dependencies wired into the factory. */
 const realDeps: CompactDeps = {
-	complete,
+	// Use streaming (`stream(...).result()`) — same transport as `complete`, but
+	// explicit. `.result()` assembles the message from the terminal `done` event,
+	// which is robust across providers (some, e.g. openai-completions, don't emit
+	// `text_end`), so we don't hand-collect stream events.
+	summarize: async (model, context, options) => {
+		const response = await stream(model as never, context as never, options as never).result();
+		const summary = response.content
+			.filter((c): c is { type: "text"; text: string } => c.type === "text")
+			.map((c) => c.text)
+			.join("\n")
+			.trim();
+		return { summary };
+	},
 	serializeText: (messages) => redactSecrets(serializeConversation(convertToLlm(messages))),
 };
 

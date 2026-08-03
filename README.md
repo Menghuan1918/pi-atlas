@@ -96,10 +96,10 @@ Passive extension (no tools, no commands) that replaces pi's default session com
 
 How it works:
 - On `session_before_compact`, it consumes pi's pre-computed `CompactionPreparation` (cut point, `messagesToSummarize`, `previousSummary`, `fileOps`) and produces a structured Markdown summary — **Goal & Targets / Constraints & Preferences / Progress / Key Decisions / Active Files / Critical Context / Next Steps** — via the session's active model, then returns `{ compaction: CompactionResult }`. pi persists it and rebuilds context; no cut logic is reinvented.
-- **Effectiveness first** — no output-token cap; the summary may be as long as needed. It replaces the pre-cut span, so the live context still shrinks.
+- **Streaming summarization** — uses pi-ai `stream(...).result()` (streaming transport; assembles from the terminal `done` event, which is robust across providers). No output-token cap — the summary may be as long as needed (effectiveness first); it replaces the pre-cut span, so the live context still shrinks.
 - **Quality levers** — reuses pi's `serializeConversation`; conservatively redacts secrets before the model sees the text; preserves user directives, file paths, commands, and error strings verbatim; updates the prior summary incrementally (`previousSummary`) rather than rewriting from scratch.
 - **Target system integration** — reads the session's `target/state.json` and injects the primary goal + target checklist (with statuses) so the summary carries goal/progress across compaction and auto-continue stays aligned. Read-only and best-effort: a missing or corrupt state file is skipped and never breaks compaction.
-- **Robust fallback** — if the active model is missing, auth can't be resolved, the summary is empty, or the model call throws, the handler returns `undefined` and pi runs its own default compaction. This extension can never break compaction.
+- **Robust fallback** — a degenerate/empty summary (e.g. the model returns the empty template on a very large input) is detected, retried once, and if still degenerate the handler returns `undefined` so pi runs its own default compaction — never persisting a useless summary (no data loss). Missing model, unresolved auth, or a thrown call likewise fall back. This extension can never break compaction.
 - Persists `{ readFiles, modifiedFiles }` in `CompactionEntry.details` so pi's cumulative file tracking survives across compactions.
 
 No configuration, no extra storage, no commands.
