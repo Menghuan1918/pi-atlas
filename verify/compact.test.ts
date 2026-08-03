@@ -267,7 +267,7 @@ const alwaysDegenerate = async () => {
 };
 const fbResult = await runCompaction(bigEvent, makeCtx(), { summarize: alwaysDegenerate, serializeText: fakeSerialize });
 assert(fbResult === undefined, "always-degenerate → falls back to pi default (void)");
-assert(calls === 2, "tried twice before falling back");
+assert(calls === 4, "tried 4 times (MAX_ATTEMPTS) before falling back");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

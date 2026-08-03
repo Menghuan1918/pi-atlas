@@ -10,13 +10,16 @@
  *
  * Design (Tier 1 / KISS, per `.workspace-docs/plans/08-03-compact-压缩插件.md`):
  *  - One handler: `session_before_compact` → returns `{ compaction: CompactionResult }`.
- *  - Summarization uses **streaming** (`stream` + direct `text_end` event collection),
- *    not `complete`/`.result()` — the most direct use of streaming transport, and
- *    more robust on very large inputs than assembling from the `done` event.
+ *  - Summarization uses **raw HTTP streaming** to the model's `/chat/completions`
+ *    endpoint (for openai-completions providers like macaron), bypassing pi-ai's
+ *    OpenAI SDK wrapper — which intermittently drops very large user-message
+ *    bodies (-> empty -> NA). Verified reliable on a 1.2M-char input. Non-openai
+ *    models fall back to pi-ai `stream(...).result()`.
  *  - No output-token cap (effectiveness first).
  *  - Secret redaction before the model sees the text.
- *  - Degenerate-summary guard: retry once; if still degenerate, fall back to pi's
- *    default compaction rather than persisting a useless summary (data loss).
+ *  - Degenerate-summary guard + progressive capping: retry with halved context on
+ *    a degenerate result; if still degenerate, fall back to pi's default compaction
+ *    rather than persisting a useless summary (data loss).
  *  - No commands, no config, no extra storage.
  *
  * `runCompaction` is exported and dependency-injected (`deps`) so the orchestration
@@ -80,7 +83,7 @@ export async function runCompaction(
 
 	// Conversation text: reuse pi's serializer (merge split-turn prefix), then redact.
 	const allMessages = [...messagesToSummarize, ...(turnPrefixMessages ?? [])];
-	const conversationText = deps.serializeText(allMessages);
+	const fullConversationText = deps.serializeText(allMessages);
 
 	// Target system integration: read this session's goal/checklist (best-effort, never throws).
 	const targetState = await loadTargetState(ctx.sessionManager.getSessionId()).catch(() => null);
@@ -88,19 +91,27 @@ export async function runCompaction(
 
 	const { readFiles, modifiedFiles } = fileListsFromOps(fileOps);
 
-	const userText = buildUserMessage({
-		conversationText,
-		previousSummary,
-		targetsBlock,
-		readFiles,
-		modifiedFiles,
-		customInstructions,
-		reason,
-	});
+	// macaron flakes (fast-returns an empty template) on very large (~285k-token)
+	// inputs. Progressive capping: try the full context first (preserve content),
+	// then halve it on each degenerate result until the model actually summarizes.
+	const CAP_FACTORS = [1, 0.5, 0.25, 0.125];
 
-	const summarizeOnce = async (): Promise<string> => {
-		// Streaming + direct text_end collection. No maxTokens cap (effectiveness
-		// first). cacheRetention "none" + fresh sessionId (throwaway call, not cached).
+	const summarizeOnce = async (capFactor: number): Promise<string> => {
+		const conversationText =
+			capFactor >= 1
+				? fullConversationText
+				: `[Note: older conversation omitted to fit the summarization context window (~${Math.round(capFactor * 100)}% retained, most recent).]\n\n${fullConversationText.slice(-Math.ceil(fullConversationText.length * capFactor))}`;
+		const userText = buildUserMessage({
+			conversationText,
+			previousSummary,
+			targetsBlock,
+			readFiles,
+			modifiedFiles,
+			customInstructions,
+			reason,
+		});
+		// Summarization call (raw HTTP streaming for openai-completions, else pi-ai
+		// stream). No maxTokens cap (effectiveness first); fresh call (not cached).
 		const { summary } = await deps.summarize(
 			model,
 			{
@@ -126,15 +137,15 @@ export async function runCompaction(
 	};
 
 	try {
-		let summary = await summarizeOnce();
-
-		// Guard against degenerate/empty summaries (e.g. the model returns the empty
-		// template instead of summarizing a large conversation). Retrying once handles
-		// transient flakes; if still degenerate, fall back to pi's default compaction
-		// rather than persisting a useless summary and losing the context.
-		if (isDegenerateSummary(summary, tokensBefore) && !signal.aborted) {
-			ctx.ui.notify("compact: degenerate summary, retrying…", "warning");
-			summary = await summarizeOnce();
+		let summary = await summarizeOnce(CAP_FACTORS[0]);
+		let attempts = 1;
+		while (isDegenerateSummary(summary, tokensBefore) && attempts < CAP_FACTORS.length && !signal.aborted) {
+			ctx.ui.notify(
+				`compact: degenerate summary, retrying with smaller context (~${Math.round(CAP_FACTORS[attempts] * 100)}%)…`,
+				"warning",
+			);
+			summary = await summarizeOnce(CAP_FACTORS[attempts]);
+			attempts++;
 		}
 
 		if (!summary || isDegenerateSummary(summary, tokensBefore)) {
@@ -161,11 +172,74 @@ export async function runCompaction(
 
 /** Real dependencies wired into the factory. */
 const realDeps: CompactDeps = {
-	// Use streaming (`stream(...).result()`) — same transport as `complete`, but
-	// explicit. `.result()` assembles the message from the terminal `done` event,
-	// which is robust across providers (some, e.g. openai-completions, don't emit
-	// `text_end`), so we don't hand-collect stream events.
 	summarize: async (model, context, options) => {
+		const m = model as { api?: string; baseUrl?: string; id?: string; maxTokens?: number };
+		const opts = (options ?? {}) as { apiKey?: string; headers?: Record<string, string>; signal?: AbortSignal };
+		const ctx = (context ?? {}) as {
+			systemPrompt?: string;
+			messages?: Array<{ content?: Array<{ text?: string }> | string }>;
+		};
+		const sysText = ctx.systemPrompt ?? "";
+		const userContent = ctx.messages?.[0]?.content;
+		const userText = Array.isArray(userContent)
+			? userContent.map((c) => c.text ?? "").join("")
+			: typeof userContent === "string"
+				? userContent
+				: "";
+
+		// For openai-completions providers (e.g. macaron), call /chat/completions
+		// directly via raw HTTP streaming. pi-ai's OpenAI SDK wrapper intermittently
+		// drops very large user-message bodies (-> empty -> NA); raw fetch + SSE
+		// reliably delivers them (verified on a 1.2M-char input).
+		if (m.api === "openai-completions" && m.baseUrl && opts.apiKey) {
+			const url = `${m.baseUrl.replace(/\/$/, "")}/chat/completions`;
+			const res = await fetch(url, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${opts.apiKey}`,
+					...(opts.headers ?? {}),
+				},
+				body: JSON.stringify({
+					model: m.id,
+					messages: [
+						{ role: "system", content: sysText },
+						{ role: "user", content: userText },
+					],
+					stream: true,
+					// Effectiveness first: no low output cap (use the model's own max).
+					max_tokens: m.maxTokens ?? 16384,
+				}),
+				signal: opts.signal,
+			});
+			if (!res.ok || !res.body) {
+				throw new Error(`summarization HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+			}
+			const chunks: string[] = [];
+			const decoder = new TextDecoder();
+			let buf = "";
+			for await (const chunk of res.body) {
+				buf += decoder.decode(chunk, { stream: true });
+				const lines = buf.split("\n");
+				buf = lines.pop() ?? "";
+				for (const ln of lines) {
+					const t = ln.trim();
+					if (!t.startsWith("data:")) continue;
+					const data = t.slice(5).trim();
+					if (data === "[DONE]") continue;
+					try {
+						const j = JSON.parse(data);
+						const c = j?.choices?.[0]?.delta?.content;
+						if (typeof c === "string") chunks.push(c);
+					} catch {
+						/* ignore non-JSON keepalive lines */
+					}
+				}
+			}
+			return { summary: chunks.join("").trim() };
+		}
+
+		// Fallback for other model APIs: pi-ai streaming (assembles from `done`).
 		const response = await stream(model as never, context as never, options as never).result();
 		const summary = response.content
 			.filter((c): c is { type: "text"; text: string } => c.type === "text")
