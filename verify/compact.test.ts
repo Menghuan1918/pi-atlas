@@ -2,11 +2,11 @@
  * compact extension — unit + orchestration tests.
  * Run: npx tsx verify/compact.test.ts
  *
- * Covers: pure helpers (redactSecrets, formatTargets, fileListsFromOps,
- * buildSystemPrompt, buildUserMessage, isDegenerateSummary) and the runCompaction
- * orchestration via dependency injection (fake `summarize` + fake serializer),
- * including the fallback paths (no model, auth fail, empty, throw, degenerate)
- * and the target-system + previous-summary + no-maxTokens integration.
+ * Covers: pure helpers (formatTargets, fileListsFromOps, buildSystemPrompt,
+ * buildAuxiliaryText, isDegenerateSummary) and the runCompaction orchestration via
+ * dependency injection (fake `summarize`), including fallback paths
+ * (no model, auth fail, empty, throw, degenerate) and the target-system +
+ * previous-summary + no-maxTokens + no-tools integration.
  */
 
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -16,12 +16,11 @@ import type { ExtensionContext, SessionBeforeCompactEvent } from "@earendil-work
 
 import { runCompaction } from "../extensions/compact/index.js";
 import {
+	buildAuxiliaryText,
 	buildSystemPrompt,
-	buildUserMessage,
 	fileListsFromOps,
 	formatTargets,
 	isDegenerateSummary,
-	redactSecrets,
 } from "../extensions/compact/summarize.js";
 import { getStatePath } from "../extensions/target/persistence.js";
 import type { TargetState } from "../extensions/target/types.js";
@@ -44,14 +43,7 @@ process.env.PI_ATLAS_DIR = tmpDir;
 
 // ---------- pure helpers ----------
 
-console.log("redactSecrets:");
-assert(redactSecrets(`key=sk-${"a".repeat(30)}`).includes("[REDACTED:openai-key]"), "redacts OpenAI key");
-assert(redactSecrets(`Bearer ${"y".repeat(25)}`).includes("[REDACTED:bearer]"), "redacts Bearer token");
-assert(redactSecrets(`ghp_${"z".repeat(40)}`).includes("[REDACTED:github-token]"), "redacts GitHub token");
-assert(redactSecrets(`password=${"s".repeat(8)}`).includes("[REDACTED:assignment]"), "redacts password= assignment");
-assert(redactSecrets(`the access token is cool`).includes("access token"), "leaves prose 'access token' untouched");
-
-console.log("\nformatTargets:");
+console.log("formatTargets:");
 const emptyState: TargetState = { primary: null, secondary: [], autoContinue: false };
 assert(formatTargets(null) === "", "null → empty block");
 assert(formatTargets(emptyState) === "", "empty state → empty block");
@@ -82,17 +74,19 @@ assert(
 );
 assert(JSON.stringify(fileListsFromOps(null).readFiles) === "[]", "null fileOps → empty lists");
 
-console.log("\nbuildSystemPrompt:");
+console.log("\nbuildSystemPrompt (handoff-style):");
 const sp = buildSystemPrompt();
-assert(sp.includes("## Goal & Targets"), "has Goal & Targets section");
-assert(sp.includes("## Active Files"), "has Active Files section");
-assert(sp.includes("EXACT wording"), "has verbatim-preservation rule");
+assert(sp.includes("## Live Thread"), "has Live Thread section");
+assert(sp.includes("## References"), "has References section");
+assert(sp.includes("## Suggested Skills"), "has Suggested Skills section");
+assert(sp.includes("References, not copies"), "has references-not-copies rule");
+assert(sp.includes("Do NOT call any tools"), "has anti-tool-call rule");
+assert(sp.includes("Do NOT continue the conversation"), "has anti-continuation rule");
 assert(sp.includes("<previous-summary>"), "explains previous-summary update rule");
 assert(sp.includes("<targets>"), "explains targets rule");
 
-console.log("\nbuildUserMessage:");
-const um = buildUserMessage({
-	conversationText: "CONVO",
+console.log("\nbuildAuxiliaryText:");
+const aux = buildAuxiliaryText({
 	previousSummary: "PREV",
 	targetsBlock: "TGT",
 	readFiles: ["a.ts"],
@@ -100,23 +94,22 @@ const um = buildUserMessage({
 	customInstructions: "focus on X",
 	reason: "manual",
 });
-assert(um.includes("<conversation>"), "includes conversation block");
-assert(um.includes("<previous-summary>"), "includes previous-summary when given");
-assert(um.includes("PREV"), "embeds previous summary text");
-assert(um.includes("<targets>"), "includes targets when given");
-assert(um.includes("<active-files>"), "includes active-files when files present");
-assert(um.includes("<custom-instructions>"), "includes custom-instructions when given");
-const um2 = buildUserMessage({ conversationText: "C", reason: "overflow" });
-assert(!um2.includes("<previous-summary>"), "omits previous-summary when absent");
-assert(!um2.includes("<active-files>"), "omits active-files when no files");
-assert(um2.includes("<note>"), "overflow reason adds a note");
-assert(!buildUserMessage({ conversationText: "C", reason: "manual" }).includes("<note>"), "manual reason omits note");
+assert(aux.includes("<previous-summary>"), "includes previous-summary when given");
+assert(aux.includes("PREV"), "embeds previous summary text");
+assert(aux.includes("<targets>"), "includes targets when given");
+assert(aux.includes("<active-files>"), "includes active-files when files present");
+assert(aux.includes("a.ts") && aux.includes("b.ts"), "embeds file lists");
+assert(aux.includes("<focus>"), "includes focus (custom instructions) when given");
+assert(!aux.includes("<note>"), "manual reason omits overflow note");
+const auxOver = buildAuxiliaryText({ reason: "overflow" });
+assert(auxOver.includes("<note>"), "overflow reason adds a note");
+assert(buildAuxiliaryText({ reason: "manual" }) === "", "all-empty input → empty string");
 
 console.log("\nisDegenerateSummary:");
 assert(isDegenerateSummary("", 418260), "empty → degenerate");
 assert(
 	isDegenerateSummary(
-		"## Goal & Targets\n(none)\n## Constraints & Preferences\n(none)\n## Progress\n### Done\n(none)\n## Key Decisions\n(none)\n",
+		"## Live Thread\n(none)\n## Key Decisions\n(none)\n## Progress\n### Done\n(none)\n## Next Steps\n(none)\n",
 		418260,
 	),
 	"all-(none) template → degenerate",
@@ -133,7 +126,6 @@ const fakeSummarize = async (model: unknown, context: unknown, options: unknown)
 	captured = { model, context, options };
 	return { summary: "SUMMARY" };
 };
-const fakeSerialize = (_messages: unknown[]) => "FAKE CONVO TEXT";
 
 function makeEvent(
 	overrides: Partial<{ previousSummary: string; reason: "manual" | "threshold" | "overflow"; customInstructions: string }> = {},
@@ -178,9 +170,15 @@ function makeCtx(opts: CtxOpts = {}): ExtensionContext {
 	} as unknown as ExtensionContext;
 }
 
+function trailingText(): string {
+	const ctx = (captured as { context: { messages: Array<{ content: Array<{ text?: string }> }> } }).context;
+	const last = ctx.messages[ctx.messages.length - 1];
+	return (last.content[0]?.text ?? "") as string;
+}
+
 console.log("\nrunCompaction — happy path:");
 captured = null;
-const result = await runCompaction(makeEvent(), makeCtx(), { summarize: fakeSummarize, serializeText: fakeSerialize });
+const result = await runCompaction(makeEvent(), makeCtx(), { summarize: fakeSummarize });
 assert(!!result && !!result.compaction, "returns a compaction result");
 const cmp = (result as { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; details: { readFiles: string[]; modifiedFiles: string[] } } }).compaction;
 assert(cmp.summary === "SUMMARY", "summary is the model output");
@@ -193,19 +191,23 @@ const opts = (captured as unknown as { options: Record<string, unknown> }).optio
 assert(opts.maxTokens === undefined, "no maxTokens cap (effectiveness first)");
 assert(opts.cacheRetention === "none", "cacheRetention none");
 assert(typeof opts.sessionId === "string", "fresh sessionId passed");
-const userText = ((captured as unknown as { context: { messages: Array<{ content: Array<{ text?: string }> }> } }).context.messages[0].content[0].text) ?? "";
-assert(userText.includes("<conversation>"), "prompt includes <conversation>");
-assert(userText.includes("FAKE CONVO TEXT"), "prompt uses serializer output (redacted conversation)");
+// No tools passed to the summarization context (anti-tool-call).
+assert(
+	(captured as unknown as { context: { tools?: unknown } }).context.tools === undefined,
+	"no tools passed to the summarization call (anti-tool-call)",
+);
+assert(trailingText().includes("Produce the handoff document now"), "trailing turn asks for the handoff");
+assert(trailingText().includes("Do NOT continue the conversation or call tools"), "trailing turn forbids continuation/tools");
 
 console.log("\nrunCompaction — fallback paths:");
-assert((await runCompaction(makeEvent(), makeCtx({ model: null }), { summarize: fakeSummarize, serializeText: fakeSerialize })) === undefined, "no model → fallback");
-assert((await runCompaction(makeEvent(), makeCtx({ ok: false }), { summarize: fakeSummarize, serializeText: fakeSerialize })) === undefined, "auth fails → fallback");
+assert((await runCompaction(makeEvent(), makeCtx({ model: null }), { summarize: fakeSummarize })) === undefined, "no model → fallback");
+assert((await runCompaction(makeEvent(), makeCtx({ ok: false }), { summarize: fakeSummarize })) === undefined, "auth fails → fallback");
 assert(
-	(await runCompaction(makeEvent(), makeCtx(), { summarize: async () => ({ summary: "   " }), serializeText: fakeSerialize })) === undefined,
+	(await runCompaction(makeEvent(), makeCtx(), { summarize: async () => ({ summary: "   " }) })) === undefined,
 	"empty summary → fallback",
 );
 assert(
-	(await runCompaction(makeEvent(), makeCtx(), { summarize: async () => { throw new Error("boom"); }, serializeText: fakeSerialize })) === undefined,
+	(await runCompaction(makeEvent(), makeCtx(), { summarize: async () => { throw new Error("boom"); } })) === undefined,
 	"summarize throws → fallback",
 );
 
@@ -221,38 +223,37 @@ const targetState: TargetState = {
 writeFileSync(statePath, JSON.stringify({ sessionId: "compact-test", state: targetState }));
 
 captured = null;
-await runCompaction(makeEvent({ previousSummary: "OLD SUMMARY" }), makeCtx(), { summarize: fakeSummarize, serializeText: fakeSerialize });
-const txt = ((captured as unknown as { context: { messages: Array<{ content: Array<{ text?: string }> }> } }).context.messages[0].content[0].text) ?? "";
-assert(txt.includes("<previous-summary>"), "prompt includes <previous-summary> when previousSummary set");
-assert(txt.includes("OLD SUMMARY"), "prompt embeds previous summary text");
-assert(txt.includes("<targets>"), "prompt includes <targets> when target state exists");
-assert(txt.includes("the overarching goal"), "prompt embeds primary goal from target state");
+await runCompaction(makeEvent({ previousSummary: "OLD SUMMARY" }), makeCtx(), { summarize: fakeSummarize });
+const txt = trailingText();
+assert(txt.includes("<previous-summary>"), "trailing turn includes <previous-summary> when previousSummary set");
+assert(txt.includes("OLD SUMMARY"), "trailing turn embeds previous summary text");
+assert(txt.includes("<targets>"), "trailing turn includes <targets> when target state exists");
+assert(txt.includes("the overarching goal"), "trailing turn embeds primary goal from target state");
 
 // Corrupt target state file → graceful (no <targets>, but still compacts).
 writeFileSync(statePath, "{ not valid json");
 captured = null;
-const resCorrupt = await runCompaction(makeEvent(), makeCtx(), { summarize: fakeSummarize, serializeText: fakeSerialize });
+const resCorrupt = await runCompaction(makeEvent(), makeCtx(), { summarize: fakeSummarize });
 assert(!!resCorrupt && !!resCorrupt.compaction, "corrupt target state does not break compaction");
-const txtCorrupt = ((captured as unknown as { context: { messages: Array<{ content: Array<{ text?: string }> }> } }).context.messages[0].content[0].text) ?? "";
-assert(!txtCorrupt.includes("<targets>"), "corrupt target state → no <targets> block");
+assert(!trailingText().includes("<targets>"), "corrupt target state → no <targets> block");
 
-console.log("\nrunCompaction — degenerate retry / fallback:");
+console.log("\nrunCompaction — degenerate retry / fallback (progressive capping):");
 const degenerateTemplate =
-	"## Goal & Targets\n(none)\n## Constraints & Preferences\n(none)\n## Progress\n### Done\n(none)\n## Key Decisions\n(none)\n";
+	"## Live Thread\n(none)\n## Key Decisions\n(none)\n## Progress\n### Done\n(none)\n## Next Steps\n(none)\n";
 const goodLongSummary =
-	"## Goal & Targets\nCompleted the compact extension with redaction, target integration, and fallback handling. " +
+	"## Live Thread\nFinished the compact extension with target integration, handoff-style prompt, and fallback handling. " +
 	"Detail. ".repeat(60);
 
 const bigEvent = makeEvent();
 (bigEvent as { preparation: { tokensBefore: number } }).preparation.tokensBefore = 50000;
 
-// 1st call degenerate, 2nd good → retries, returns the good summary.
+// 1st call degenerate, 2nd good → retries with capped history, returns the good summary.
 let calls = 0;
 const flakeSummarize = async () => {
 	calls++;
 	return { summary: calls === 1 ? degenerateTemplate : goodLongSummary };
 };
-const retryResult = await runCompaction(bigEvent, makeCtx(), { summarize: flakeSummarize, serializeText: fakeSerialize });
+const retryResult = await runCompaction(bigEvent, makeCtx(), { summarize: flakeSummarize });
 assert(
 	retryResult !== undefined && (retryResult as { compaction?: { summary?: string } }).compaction?.summary === goodLongSummary,
 	"degenerate-then-good → returns good summary after retry",
@@ -265,9 +266,9 @@ const alwaysDegenerate = async () => {
 	calls++;
 	return { summary: degenerateTemplate };
 };
-const fbResult = await runCompaction(bigEvent, makeCtx(), { summarize: alwaysDegenerate, serializeText: fakeSerialize });
+const fbResult = await runCompaction(bigEvent, makeCtx(), { summarize: alwaysDegenerate });
 assert(fbResult === undefined, "always-degenerate → falls back to pi default (void)");
-assert(calls === 4, "tried 4 times (MAX_ATTEMPTS) before falling back");
+assert(calls === 4, "tried 4 times (CAP_FACTORS) before falling back");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

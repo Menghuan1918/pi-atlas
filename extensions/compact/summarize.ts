@@ -1,49 +1,20 @@
 /**
  * compact extension — summarization helpers (pure functions).
  *
- * Builds the summarization prompt for pi's `session_before_compact` hook:
- *  - reuses pi's `serializeConversation` output (passed in as `conversationText`),
- *  - conservatively redacts secrets before the model sees the text,
- *  - injects the pi-atlas target system's goal/checklist (so auto-continue stays
- *    aligned after compaction),
- *  - injects the file-operations list (read/modified) computed from `FileOperations`,
- *  - produces a strict structured-Markdown instruction set (opencode template +
- *    handoff "resumable core" + codex "another-you-resumes-this" framing).
+ * Builds the summarization prompt for pi's `session_before_compact` hook using a
+ * **handoff-style** document (modeled on the `productivity/handoff` skill):
+ * resumable core, references-not-copies, live thread, suggested skills. The
+ * conversation is sent as **real history** (structured messages) + a trailing
+ * "produce the handoff" instruction (codex-style), NOT serialized into one
+ * giant text block.
  *
- * These functions are pure and side-effect free so they can be unit tested without
- * a model or a session.
+ * These functions are pure and side-effect free so they can be unit tested
+ * without a model or a session.
  */
 
 import type { FileOperations } from "@earendil-works/pi-coding-agent";
 
 import type { TargetState } from "../target/types.js";
-
-/**
- * High-confidence secret patterns. Conservative on purpose (risk: false positives
- * that strip legitimate content). Each match is replaced with a labelled placeholder
- * so the summarizer can tell something was redacted.
- */
-const SECRET_PATTERNS: ReadonlyArray<{ kind: string; re: RegExp }> = [
-	{ kind: "openai-key", re: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
-	{ kind: "aws-key", re: /\bAKIA[0-9A-Z]{16}\b/g },
-	{ kind: "google-key", re: /\bAIza[0-9A-Za-z_-]{35}\b/g },
-	{ kind: "github-token", re: /\bgh[opsr]_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{22,}\b/g },
-	{ kind: "slack-token", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
-	{ kind: "bearer", re: /\bBearer\s+[A-Za-z0-9._-]{20,}\b/g },
-	{
-		kind: "assignment",
-		re: /\b(?:password|passwd|api[_-]?key|apikey|secret|access[_-]?token)\s*[:=]\s*["']?[^\s"']{6,}["']?/gi,
-	},
-];
-
-/** Conservatively redact secrets from text before it is sent to the summarization model. */
-export function redactSecrets(text: string): string {
-	let out = text;
-	for (const { kind, re } of SECRET_PATTERNS) {
-		out = out.replace(re, `[REDACTED:${kind}]`);
-	}
-	return out;
-}
 
 /**
  * Format the target system state into a compact block for the prompt.
@@ -88,22 +59,7 @@ export function fileListsFromOps(
 	return { readFiles, modifiedFiles };
 }
 
-/**
- * Detect a degenerate/empty summary that would cause data loss if persisted
- * (e.g. the model returned the empty template instead of summarizing a large
- * conversation). For a substantial conversation, a real summary is non-trivial;
- * the all-"(none)" template is ~230 chars with many "(none)" markers.
- */
-export function isDegenerateSummary(summary: string, tokensBefore: number): boolean {
-	const s = summary.trim();
-	if (!s) return true;
-	if (tokensBefore <= 20000) return false; // small conversations aren't checked
-	const noneCount = (s.match(/\(none\)/g) ?? []).length;
-	return s.length < 400 || noneCount >= 4;
-}
-
 export interface PromptInputs {
-	conversationText: string;
 	previousSummary?: string;
 	targetsBlock?: string;
 	readFiles?: string[];
@@ -113,46 +69,49 @@ export interface PromptInputs {
 }
 
 /**
- * The summarizer's system prompt: role framing + strict output structure + rules.
- * Effectiveness-first: asks for a complete handoff (omitting needed detail is worse
- * than being verbose). No length cap is imposed at the call site either.
+ * The summarizer's system prompt: a handoff-style document contract.
+ * Also pins down anti-continuation / anti-tool-call rules so the model, on seeing
+ * real history (with tool calls/results), only emits the handoff document.
  */
 export function buildSystemPrompt(): string {
 	return [
-		"You are a context-checkpoint summarizer for a long-running coding agent. Another instance of you was working on a task and produced the conversation below. Your job is to produce a structured handoff summary that lets a fresh instance seamlessly continue the work.",
+		"You are producing a **handoff document** for another instance of yourself that will pick up this work. Another you was working on a task and produced the conversation above (real history is provided as messages, ending with this instruction). Your job: squeeze the conversation down to its **resumable core** — what's in flight, why, and what's next — so the next agent inherits the momentum, not the noise.",
 		"",
-		"This is COMPACTION: squeeze the conversation down to its resumable core. Drop noise — pleasantries, chit-chat, dead-end debugging, superseded attempts, status narration. Keep everything needed to resume momentum and avoid re-doing finished work. Omitting needed detail is worse than being verbose.",
+		"This is COMPACTION. Drop noise — pleasantries, chit-chat, dead-end debugging, superseded attempts, status narration. Keep everything needed to resume and avoid re-doing finished work. Omitting needed detail is worse than being verbose.",
 		"",
-		"Output EXACTLY this Markdown structure. Keep every section even if empty (write \"(none)\"):",
+		"Output a single Markdown document with these sections. Keep every section, even if empty (write \"(none)\"):",
 		"",
-		"## Goal & Targets",
-		"## Constraints & Preferences",
+		"## Live Thread",
+		"## Key Decisions & Constraints",
 		"## Progress",
 		"### Done",
 		"### In Progress",
 		"### Blocked",
-		"## Key Decisions",
+		"## References",
 		"## Active Files",
 		"## Critical Context",
 		"## Next Steps",
+		"## Suggested Skills",
 		"",
 		"Rules:",
+		"- **References, not copies**: do NOT duplicate content already captured in specs, plans, ADRs, issues, commits, or diffs. Reference them by path or URL instead. The document carries only the live thread.",
 		"- Preserve EXACT wording of: user directives, constraints, decisions, goals; file paths; function/symbol names; shell commands; error messages; URLs; identifiers. Do not paraphrase these.",
-		"- Terse bullets, not prose paragraphs.",
-		"- Do NOT mention compaction or that you are summarizing.",
-		"- Do NOT continue the conversation or answer any questions inside it.",
-		"- Secrets already appear as [REDACTED:...]; never restore or guess them.",
+		"- Be terse: bullets, not prose paragraphs.",
+		"- Write in the conversation's own terms.",
+		"- `References` = paths/URLs to specs/plans/ADRs/issues/commits/diffs/files that hold settled detail. `Active Files` = files read/modified (from the <active-files> block if provided).",
+		"- `Suggested Skills` = skills the next agent should reach for, if any are evident from the conversation; else \"(none)\".",
 		"- If a <previous-summary> is provided, UPDATE it: keep still-true details, drop stale ones, merge new facts. Do not rewrite from scratch.",
 		"- If a <targets> block is provided, restate the primary goal and the target checklist with their statuses, updated for progress made in the conversation.",
-		"- If an <active-files> block is provided, list those files under Active Files.",
+		"- Do NOT continue the conversation. Do NOT call any tools. Do NOT answer questions in the conversation. ONLY output the handoff document.",
+		"- Do NOT mention compaction or that you are summarizing.",
 	].join("\n");
 }
 
 /**
- * Build the user message body: tagged data blocks (only those present) followed by
- * the conversation transcript. The summarizer's system prompt (above) explains them.
+ * Build the auxiliary context (non-conversation blocks) that rides along with the
+ * trailing "produce the handoff" instruction. Empty blocks are omitted.
  */
-export function buildUserMessage(input: PromptInputs): string {
+export function buildAuxiliaryText(input: PromptInputs): string {
 	const sections: string[] = [];
 	if (input.previousSummary) {
 		sections.push(`<previous-summary>\n${input.previousSummary}\n</previous-summary>`);
@@ -166,13 +125,26 @@ export function buildUserMessage(input: PromptInputs): string {
 		sections.push(`<active-files>\nRead: ${read}\nModified: ${modified}\n</active-files>`);
 	}
 	if (input.customInstructions) {
-		sections.push(`<custom-instructions>\n${input.customInstructions}\n</custom-instructions>`);
+		sections.push(`<focus>\n${input.customInstructions}\n</focus>`);
 	}
 	if (input.reason === "overflow") {
 		sections.push(
-			`<note>This compaction was triggered by context overflow and the turn will be retried. Produce a complete, focused summary so the retried turn fits.</note>`,
+			`<note>This compaction was triggered by context overflow and the turn will be retried. Produce a complete, focused handoff so the retried turn fits.</note>`,
 		);
 	}
-	sections.push(`<conversation>\n${input.conversationText}\n</conversation>`);
 	return sections.join("\n\n");
+}
+
+/**
+ * Detect a degenerate/empty summary that would cause data loss if persisted
+ * (e.g. the model returned the empty template instead of summarizing). For a
+ * substantial conversation, a real handoff is non-trivial; the all-"(none)"
+ * template is ~230 chars with many "(none)" markers.
+ */
+export function isDegenerateSummary(summary: string, tokensBefore: number): boolean {
+	const s = summary.trim();
+	if (!s) return true;
+	if (tokensBefore <= 20000) return false; // small conversations aren't checked
+	const noneCount = (s.match(/\(none\)/g) ?? []).length;
+	return s.length < 400 || noneCount >= 4;
 }
