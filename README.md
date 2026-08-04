@@ -2,22 +2,25 @@
 
 > 中文文档：[README_CN.md](README_CN.md)
 
-Event-driven coding extensions for the [pi](https://github.com/earendil-works/pi-mono) agent — async tasks, goal-driven auto-continue, and Feishu notifications for unattended infra/SRE runs.
+Event-driven coding extensions for the [pi](https://github.com/earendil-works/pi-mono) agent — async bash & sub-agent tasks, goal-driven auto-continue, and Feishu notifications for unattended infra/SRE runs.
 
 ## Why pi-atlas
 
 LLM coding agents stop the moment a turn ends. For infra work — diagnosing an incident at 3am, running a long deploy, waiting on `terraform apply` — that's the wrong model. You want the agent to keep going, loop back when it stalls, and ping you on Feishu only when it actually needs a human.
 
-pi-atlas turns pi into that kind of agent. Four extensions compose a closed loop:
+pi-atlas turns pi into that kind of agent. Four extensions compose a self-driving loop:
 
-- **Set a goal, walk away.** `/goal <text>` locks an objective and switches on auto-continue. The agent works toward it across as many turns as needed.
-- **Async by default.** Long commands (builds, tests, deploys, `kubectl logs -f`) run as background tasks that return immediately and stream live progress — no more 60s timeouts killing your deploy.
+- **Set a goal, walk away.** `/goal <text>` locks an objective and switches on auto-continue. The agent works toward it across as many turns as needed, breaking it into a trackable checklist.
+- **Async by default.** Long commands (builds, tests, deploys, `kubectl logs -f`) run as background `bash` tasks that return instantly and stream live tail + exit status — no more 60s timeouts killing your deploy mid-flight.
+- **Delegate, don't bloat.** `create_agent` spawns sub-agents (`explorer`, `code-reviewer`, `general`) in isolated sessions that run in parallel, report back a compressed summary, and keep the main context lean. Nesting is bounded (`PI_ATLAS_TASK_DEPTH`, max 3) so it never runs away.
 - **Ask only when it matters.** When the agent needs a decision, `ask_user` blocks the turn and fires a Feishu card with an "open session" button. While a goal is active, unanswered questions time out at 60s so an overnight run never deadlocks.
-- **Loop, don't settle.** On every `agent_settled`, a guard coordinator picks the next move in priority order — aborted → pause and hand back control; background tasks still running → nudge the agent to await them; goal active → inject a continuation with a completion audit. Only when nothing is left does it notify "session ended" and truly idle.
+- **Loop, don't settle.** On every `agent_settled`, a guard coordinator picks the next move in strict priority — aborted → pause and hand back control; background tasks still running → nudge the agent to await them; goal active → inject a continuation with a completion audit. Only when nothing is left does it notify "session ended" and truly idle.
 
 The whole loop is event-driven: it rides on pi's lifecycle events (`tool_call`, `turn_end`, `agent_settled`) and injects continuations as plain follow-up user messages — never touching the system prompt, so provider prefix caching stays intact across the long run.
 
 → Full architecture and event flow: [docs/principles.md](docs/principles.md)
+
+> Prefer a browser? [pi-web](https://github.com/Menghuan1918/pi-web) is a fork of pi's web UI with two special adaptations for pi-atlas — it fixes sub-agent process spawning under Next.js and renders `ask_user` questions inline in the chat.
 
 ## Extensions at a glance
 

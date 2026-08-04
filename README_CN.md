@@ -2,22 +2,25 @@
 
 > English: [README.md](README.md)
 
-[pi](https://github.com/earendil-works/pi-mono) 编码 Agent 的事件驱动扩展集合 —— 异步任务、目标驱动的自动续跑，以及面向无人值守 infra/SRE 场景的飞书通知。
+[pi](https://github.com/earendil-works/pi-mono) 编码 Agent 的事件驱动扩展集合 —— 异步 bash 与子代理任务、目标驱动的自动续跑，以及面向无人值守 infra/SRE 场景的飞书通知。
 
 ## 为什么是 pi-atlas
 
 LLM 编码 Agent 在一轮结束时就会停下。对于 infra 工作——凌晨排查事故、跑一次长部署、等 `terraform apply` 结束——这是错的模型。你要的是 Agent 自己继续推进、卡住时自动绕回、只在真正需要人时才在飞书提醒你。
 
-pi-atlas 把 pi 变成这样的 Agent。四个扩展组成一个闭环：
+pi-atlas 把 pi 变成这样的 Agent。四个扩展组成一个自驱动闭环：
 
-- **定目标，放手不管。** `/goal <文本>` 锁定一个目标并开启自动续跑。Agent 跨任意多轮朝它推进。
-- **默认异步。** 长命令（构建、测试、部署、`kubectl logs -f`）作为后台任务运行，立即返回并流式输出进度——不再被 60 秒超时打断部署。
+- **定目标，放手不管。** `/goal <文本>` 锁定一个目标并开启自动续跑。Agent 跨任意多轮朝它推进，并拆成可跟踪的待办清单。
+- **默认异步。** 长命令（构建、测试、部署、`kubectl logs -f`）作为后台 `bash` 任务运行，立即返回并流式输出末尾内容 + 退出码——不再被 60 秒超时打断半截部署。
+- **委托而非臃肿。** `create_agent` 派生子代理（`explorer`、`code-reviewer`、`general`）在隔离会话中并行运行，回传压缩摘要，让主上下文保持精简。嵌套深度有界（`PI_ATLAS_TASK_DEPTH`，上限 3），不会失控。
 - **只在关键处提问。** 当 Agent 需要决策时，`ask_user` 阻塞当前轮并触发一张带「打开会话」按钮的飞书卡片。目标激活期间，未回答的问题会在 60 秒后超时，避免夜间运行卡死。
-- **循环，而不是停摆。** 每次 `agent_settled`，guard 协调器按优先级决定下一步——被中断 → 暂停并把控制权交还用户；仍有后台任务 → 提示 Agent 去等待它们；目标激活 → 注入带完成审计的续跑消息。只有真的无事可做时，才通知「会话结束」并真正空闲。
+- **循环，而不是停摆。** 每次 `agent_settled`，guard 协调器按严格优先级决定下一步——被中断 → 暂停并把控制权交还用户；仍有后台任务 → 提示 Agent 去等待它们；目标激活 → 注入带完成审计的续跑消息。只有真的无事可做时，才通知「会话结束」并真正空闲。
 
 整个闭环是事件驱动的：它挂在 pi 的生命周期事件（`tool_call`、`turn_end`、`agent_settled`）上，以普通 follow-up 用户消息形式注入续跑——绝不触碰 system prompt，所以供应商的前缀缓存在整段长任务中保持有效。
 
 → 完整架构与事件流：[docs/principles.md](docs/principles.md)
+
+> 想用浏览器？[pi-web](https://github.com/Menghuan1918/pi-web) 是 pi Web UI 的 fork，专门为 pi-atlas 做了两处适配——修复了 Next.js 下子代理进程 spawn 的问题，并把 `ask_user` 提问内联渲染在聊天里。
 
 ## 扩展一览
 
