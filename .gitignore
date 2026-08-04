@@ -23,8 +23,9 @@ Thumbs.db
 # workspace-docs (independent shared git repo, not part of this project)
 .workspace-docs/
 
-# Internal dev docs (plans, notes, etc.)
-docs/
+# Internal dev docs (plans, notes, etc.) — published principle doc is tracked below
+docs/*
+!docs/principles.md
 
 # pi session logs (timestamp_uuid.jsonl — written to cwd by pi runtime/tests)
 /*.jsonl

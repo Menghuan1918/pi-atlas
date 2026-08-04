@@ -2,11 +2,26 @@
 
 > 中文文档：[README_CN.md](README_CN.md)
 
-TypeScript extensions for the [pi](https://github.com/earendil-works/pi-mono) coding agent — asynchronous task management, user interaction, goal tracking, auto-continue, web search, and Feishu notifications.
+Event-driven coding extensions for the [pi](https://github.com/earendil-works/pi-mono) agent — async tasks, goal-driven auto-continue, and Feishu notifications for unattended infra/SRE runs.
 
-## 介绍
+## Why pi-atlas
 
-pi-atlas is a collection of independent pi extensions. Each extension is a self-contained directory under `extensions/` and can be installed individually. They share a single runtime data root at `~/.pi/atlas/` (overridable via `PI_ATLAS_DIR`), scoped per session under `~/.pi/atlas/sessions/<sessionId>/`.
+LLM coding agents stop the moment a turn ends. For infra work — diagnosing an incident at 3am, running a long deploy, waiting on `terraform apply` — that's the wrong model. You want the agent to keep going, loop back when it stalls, and ping you on Feishu only when it actually needs a human.
+
+pi-atlas turns pi into that kind of agent. Four extensions compose a closed loop:
+
+- **Set a goal, walk away.** `/goal <text>` locks an objective and switches on auto-continue. The agent works toward it across as many turns as needed.
+- **Async by default.** Long commands (builds, tests, deploys, `kubectl logs -f`) run as background tasks that return immediately and stream live progress — no more 60s timeouts killing your deploy.
+- **Ask only when it matters.** When the agent needs a decision, `ask_user` blocks the turn and fires a Feishu card with an "open session" button. While a goal is active, unanswered questions time out at 60s so an overnight run never deadlocks.
+- **Loop, don't settle.** On every `agent_settled`, a guard coordinator picks the next move in priority order — aborted → pause and hand back control; background tasks still running → nudge the agent to await them; goal active → inject a continuation with a completion audit. Only when nothing is left does it notify "session ended" and truly idle.
+
+The whole loop is event-driven: it rides on pi's lifecycle events (`tool_call`, `turn_end`, `agent_settled`) and injects continuations as plain follow-up user messages — never touching the system prompt, so provider prefix caching stays intact across the long run.
+
+→ Full architecture and event flow: [docs/principles.md](docs/principles.md)
+
+## Extensions at a glance
+
+pi-atlas is a collection of independent pi extensions. Each is a self-contained directory under `extensions/` and can be installed individually. They share a single runtime data root at `~/.pi/atlas/` (overridable via `PI_ATLAS_DIR`), scoped per session under `~/.pi/atlas/sessions/<sessionId>/`.
 
 | Extension | Type | What it does |
 |-----------|------|--------------|
@@ -152,11 +167,11 @@ Feishu config is global (not per session) at `~/.pi/atlas/notify.json`:
 
 **Not a pi extension** — a standalone stdio server that exposes pi as an [Agent Client Protocol v2](https://agentclientprotocol.com/) agent. It lets ACP v2-compatible clients (IDEs, editors) drive pi: `newSession` / `prompt` / `cancel` / `resume` / `close`, plus vendor extensions for fork/rewind and ask-user.
 
-Run it via the npm bin (it reads NDJSON from stdin, writes one JSON message per line to stdout):
+Run it from source (it reads NDJSON from stdin, writes one JSON message per line to stdout). `pi-acp-v2` is **not** included in the npm package — clone the repo and run it with tsx:
 
 ```bash
-npx pi-acp-v2
-# or, from the repo:
+git clone https://github.com/Menghuan1918/pi-atlas.git
+cd pi-atlas && npm install
 npx tsx extensions/pi-acp-v2/server.ts
 ```
 
@@ -171,7 +186,17 @@ Set `PI_ACP_V2_FAKE_MODEL=1` to use a deterministic fake model (no LLM/auth/netw
 
 ### Install the extensions
 
-Each extension is a directory under `extensions/`. Install the ones you want either by symlinking into pi's extensions dir (development) or by listing paths in `settings.json`.
+Each extension is a directory under `extensions/`. The recommended way is to install the published npm package and let pi load all of them via the `pi` manifest:
+
+**Via npm (recommended):**
+
+```bash
+pi install npm:pi-atlas
+# or try it without installing:
+pi -e npm:pi-atlas
+```
+
+For development, symlink individual extension directories or list their paths in `settings.json`:
 
 **Via symlink (development):**
 
@@ -215,17 +240,15 @@ ln -s /path/to/pi-atlas/extensions/guard        ~/.pi/agent/extensions/guard
 
 ### Install pi-acp-v2 (for ACP clients)
 
-`pi-acp-v2` is an npm bin, not a symlinked extension. After `npm install`, point your ACP v2 client at the command:
+`pi-acp-v2` is a standalone stdio server, **not** included in the npm package. Clone the repo, install deps, and point your ACP v2 client at the tsx entry (run from the repo root):
 
 ```jsonc
-// example ACP client config (stdio)
+// example ACP client config (stdio) — cwd = the cloned repo root
 {
   "command": "npx",
-  "args": ["pi-acp-v2"]
+  "args": ["tsx", "extensions/pi-acp-v2/server.ts"]
 }
 ```
-
-Or run it directly: `npx tsx extensions/pi-acp-v2/server.ts`.
 
 ## Development
 

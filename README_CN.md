@@ -2,9 +2,24 @@
 
 > English: [README.md](README.md)
 
-[pi](https://github.com/earendil-works/pi-mono) 编码 Agent 的 TypeScript 扩展集合 —— 异步任务管理、用户交互、目标管理、自动续跑、网页搜索和飞书通知。
+[pi](https://github.com/earendil-works/pi-mono) 编码 Agent 的事件驱动扩展集合 —— 异步任务、目标驱动的自动续跑，以及面向无人值守 infra/SRE 场景的飞书通知。
 
-## 介绍
+## 为什么是 pi-atlas
+
+LLM 编码 Agent 在一轮结束时就会停下。对于 infra 工作——凌晨排查事故、跑一次长部署、等 `terraform apply` 结束——这是错的模型。你要的是 Agent 自己继续推进、卡住时自动绕回、只在真正需要人时才在飞书提醒你。
+
+pi-atlas 把 pi 变成这样的 Agent。四个扩展组成一个闭环：
+
+- **定目标，放手不管。** `/goal <文本>` 锁定一个目标并开启自动续跑。Agent 跨任意多轮朝它推进。
+- **默认异步。** 长命令（构建、测试、部署、`kubectl logs -f`）作为后台任务运行，立即返回并流式输出进度——不再被 60 秒超时打断部署。
+- **只在关键处提问。** 当 Agent 需要决策时，`ask_user` 阻塞当前轮并触发一张带「打开会话」按钮的飞书卡片。目标激活期间，未回答的问题会在 60 秒后超时，避免夜间运行卡死。
+- **循环，而不是停摆。** 每次 `agent_settled`，guard 协调器按优先级决定下一步——被中断 → 暂停并把控制权交还用户；仍有后台任务 → 提示 Agent 去等待它们；目标激活 → 注入带完成审计的续跑消息。只有真的无事可做时，才通知「会话结束」并真正空闲。
+
+整个闭环是事件驱动的：它挂在 pi 的生命周期事件（`tool_call`、`turn_end`、`agent_settled`）上，以普通 follow-up 用户消息形式注入续跑——绝不触碰 system prompt，所以供应商的前缀缓存在整段长任务中保持有效。
+
+→ 完整架构与事件流：[docs/principles.md](docs/principles.md)
+
+## 扩展一览
 
 pi-atlas 是一组相互独立的 pi 扩展。每个扩展是 `extensions/` 下的独立目录，可单独安装。它们共享同一个运行时数据根目录 `~/.pi/atlas/`（可用 `PI_ATLAS_DIR` 覆盖），按会话隔离在 `~/.pi/atlas/sessions/<sessionId>/` 下。
 
@@ -14,6 +29,7 @@ pi-atlas 是一组相互独立的 pi 扩展。每个扩展是 `extensions/` 下�
 | `askuser` | 工具 | 向用户提问并阻塞等待回答 |
 | `target` | 工具 + 命令 | 目标/待办管理 + `/goal` 自动续跑 |
 | `bash-timeout` | 被动 | 为内置 `bash` 工具注入默认超时 |
+| `compact` | 被动 | 更高质量的会话压缩（替换默认摘要） |
 | `websearch` | 工具 | 经 Anthropic 兼容供应商做服务端网页搜索 |
 | `guard` | 被动 | 协调 `agent_settled` + 飞书通知 |
 | `pi-acp-v2` | 独立服务 | 把 pi 暴露为 stdio 上的 ACP v2 agent（开发桥接，非 pi 扩展） |
@@ -136,11 +152,11 @@ pi-atlas 是一组相互独立的 pi 扩展。每个扩展是 `extensions/` 下�
 
 **不是 pi 扩展** —— 一个独立的 stdio 服务，把 pi 暴露为 [Agent Client Protocol v2](https://agentclientprotocol.com/) agent。它让 ACP v2 兼容客户端（IDE、编辑器）驱动 pi：`newSession` / `prompt` / `cancel` / `resume` / `close`，以及 fork/rewind、ask-user 等扩展方法。
 
-通过 npm bin 运行（从 stdin 读 NDJSON，每行一条 JSON 消息写到 stdout）：
+从源码运行（从 stdin 读 NDJSON，每行一条 JSON 消息写到 stdout）。`pi-acp-v2` **不在** npm 包内——克隆仓库后用 tsx 运行：
 
 ```bash
-npx pi-acp-v2
-# 或在仓库内直接运行：
+git clone https://github.com/Menghuan1918/pi-atlas.git
+cd pi-atlas && npm install
 npx tsx extensions/pi-acp-v2/server.ts
 ```
 
@@ -155,7 +171,17 @@ npx tsx extensions/pi-acp-v2/server.ts
 
 ### 安装扩展
 
-每个扩展是 `extensions/` 下的一个目录。按需把要用的扩展软链到 pi 的扩展目录（开发模式），或在 `settings.json` 中列出路径。
+每个扩展是 `extensions/` 下的一个目录。推荐方式是安装已发布的 npm 包，让 pi 通过 `pi` 清单一次性加载全部扩展：
+
+**通过 npm（推荐）：**
+
+```bash
+pi install npm:pi-atlas
+# 或不安装直接试用：
+pi -e npm:pi-atlas
+```
+
+开发模式下，可把单个扩展目录软链到 pi 的扩展目录，或在 `settings.json` 中列出路径：
 
 **通过软链接（开发模式）：**
 
@@ -164,6 +190,7 @@ ln -s /path/to/pi-atlas/extensions/task         ~/.pi/agent/extensions/task
 ln -s /path/to/pi-atlas/extensions/askuser      ~/.pi/agent/extensions/askuser
 ln -s /path/to/pi-atlas/extensions/target       ~/.pi/agent/extensions/target
 ln -s /path/to/pi-atlas/extensions/bash-timeout  ~/.pi/agent/extensions/bash-timeout
+ln -s /path/to/pi-atlas/extensions/compact       ~/.pi/agent/extensions/compact
 ln -s /path/to/pi-atlas/extensions/websearch     ~/.pi/agent/extensions/websearch
 ln -s /path/to/pi-atlas/extensions/guard         ~/.pi/agent/extensions/guard
 ```
@@ -177,6 +204,7 @@ ln -s /path/to/pi-atlas/extensions/guard         ~/.pi/agent/extensions/guard
     "/path/to/pi-atlas/extensions/askuser",
     "/path/to/pi-atlas/extensions/target",
     "/path/to/pi-atlas/extensions/bash-timeout",
+    "/path/to/pi-atlas/extensions/compact",
     "/path/to/pi-atlas/extensions/websearch",
     "/path/to/pi-atlas/extensions/guard"
   ]
@@ -197,17 +225,15 @@ ln -s /path/to/pi-atlas/extensions/guard         ~/.pi/agent/extensions/guard
 
 ### 安装 pi-acp-v2（供 ACP 客户端）
 
-`pi-acp-v2` 是 npm bin，不是软链扩展。`npm install` 后，让 ACP v2 客户端指向该命令：
+`pi-acp-v2` 是独立的 stdio 服务，**不在** npm 包内。克隆仓库、安装依赖后，让 ACP v2 客户端指向 tsx 入口（在仓库根目录运行）：
 
 ```jsonc
-// ACP 客户端配置示例（stdio）
+// ACP 客户端配置示例（stdio）— cwd = 克隆的仓库根目录
 {
   "command": "npx",
-  "args": ["pi-acp-v2"]
+  "args": ["tsx", "extensions/pi-acp-v2/server.ts"]
 }
 ```
-
-或直接运行：`npx tsx extensions/pi-acp-v2/server.ts`。
 
 ## 开发
 
