@@ -86,14 +86,40 @@ async function main(): Promise<void> {
     targetManager.getState(sessionId).primary?.status === "active",
     "primary starts as active",
   );
+  assert(
+    targetManager.getState(sessionId).autoContinue === true,
+    "set activates goal mode (auto-continue)",
+  );
+  assert(
+    targetManager.getState(sessionId).askUserTimeoutCap === false,
+    "set → goal mode, not goal-auto (no ask_user timeout cap)",
+  );
+  assert(
+    targetManager.isAutoContinueActive(sessionId) === true,
+    "set → auto-continue active",
+  );
 
-  // set again (no auto-continue, should allow update)
+  // set again while goal mode active → rejected (primary locked)
   text = await callTool({ action: "set", text: "Refactor auth v2" });
-  assert(text.includes("Primary target set"), "set updates when no auto-continue");
+  assert(text.includes("locked by user"), "set rejected while goal mode active");
+  assert(
+    targetManager.getState(sessionId).primary?.text === "Refactor auth module",
+    "primary text unchanged when locked",
+  );
+
+  // goalOff, then set again → allowed, re-enters goal mode
+  await targetManager.goalOff(sessionId);
+  text = await callTool({ action: "set", text: "Refactor auth v2" });
+  assert(text.includes("Primary target set"), "set works after goalOff");
   assert(
     targetManager.getState(sessionId).primary?.text === "Refactor auth v2",
     "primary text updated",
   );
+  assert(
+    targetManager.isAutoContinueActive(sessionId) === true,
+    "set after goalOff re-enters goal mode",
+  );
+  await targetManager.goalOff(sessionId);
 
   // ── add ──────────────────────────────────────────────────────────
   console.log("\nadd action:");
@@ -248,6 +274,8 @@ async function main(): Promise<void> {
   assert(st.secondary[0]?.id === 1, "secondary #1 id = 1");
   assert(st.secondary[1]?.status === "completed", "secondary #2 status = completed");
   assert(st.secondary[2]?.note === "blocked", "secondary #3 note preserved");
+  assert(st.autoContinue === true, "update_targets with text enters goal mode");
+  assert(st.askUserTimeoutCap === false, "update_targets → goal mode, not goal-auto");
 
   // Replace: omit text → preserve existing primary, replace secondary
   text = await callTool({
@@ -302,6 +330,7 @@ async function main(): Promise<void> {
 
   // ── update text-only and note-only (status optional) ───────────
   console.log("\nupdate text/note only:");
+  await targetManager.goalOff(sessionId); // unlock before agent set
   await callTool({ action: "set", text: "Original primary" });
   // note-only: no status needed
   text = await callTool({ action: "update", id: 0, note: "just a note" });
@@ -339,8 +368,8 @@ async function main(): Promise<void> {
     "details.primaryStatus correct",
   );
   assert(
-    full.details.autoContinue === false,
-    "details.autoContinue false for set",
+    full.details.autoContinue === true,
+    "details.autoContinue true for set (goal mode)",
   );
 
   await targetManager.goalSet(sessionId, "Test details");
@@ -348,6 +377,29 @@ async function main(): Promise<void> {
   assert(
     full2.details.autoContinue === true,
     "details.autoContinue true after goalSet",
+  );
+
+  // ── goal-auto mode (ask_user timeout cap) ────────────────────────────
+  console.log("\ngoal-auto mode (askUserTimeoutCap):");
+  await targetManager.goalSet(sessionId, "Auto goal", true);
+  assert(
+    targetManager.isAskUserTimeoutCapped(sessionId) === true,
+    "goalSet(..., true) → goal-auto (cap on)",
+  );
+  assert(
+    targetManager.getState(sessionId).askUserTimeoutCap === true,
+    "askUserTimeoutCap persisted in state",
+  );
+  await targetManager.goalSet(sessionId, "Plain goal", false);
+  assert(
+    targetManager.isAskUserTimeoutCapped(sessionId) === false,
+    "goalSet(..., false) → goal mode (cap off)",
+  );
+  await targetManager.goalSet(sessionId, "Auto again", true);
+  await targetManager.goalOff(sessionId);
+  assert(
+    targetManager.isAskUserTimeoutCapped(sessionId) === false,
+    "cap not effective when auto-continue off",
   );
 
   // Cleanup

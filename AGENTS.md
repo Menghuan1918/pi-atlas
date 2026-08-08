@@ -72,43 +72,48 @@ npm test            # 运行全部测试套件
 
 ```ts
 TargetItem { id: number; text: string; status: "active" | "completed" | "failed"; note?: string }
-TargetState { primary: TargetItem | null; secondary: TargetItem[]; autoContinue: boolean }
+TargetState { primary: TargetItem | null; secondary: TargetItem[]; autoContinue: boolean; askUserTimeoutCap: boolean }
 ```
 
 - `primary`（id=0）是主目标，驱动 auto-continue
 - `secondary`（id=1,2,3,…）是次目标，用于进度追踪
 - `autoContinue` 控制 guard 是否在 `agent_settled` 时注入续跑消息
+- `askUserTimeoutCap` 区分模式：`false` = goal 模式（ask_user 用配置超时，默认无限等待）；`true` = goal-auto 模式（ask_user 封顶 60s，无人应答不卡自主循环）
 
 ### Target 工具（5 actions）
 
 | Action | 说明 |
 |--------|------|
-| `set` | 设置/更新主 target 文本。autoContinue=true 时拒绝（主 target 被用户锁定） |
+| `set` | 设置主 target 文本。设置成功即自动进入 **goal 模式**（auto-continue 开启、主 target 锁定）。autoContinue=true 时拒绝（主 target 被用户锁定） |
 | `add` | 添加次 target，返回新 id |
 | `update` | 更新任意 target 状态。id=0 + completed/failed → 关闭 auto-continue |
-| `update_targets` | 全量覆盖所有 target。省略 text 时保留现有主 target，只替换次 target。autoContinue=true 时自动跳过主 target（部分失败），只覆盖次 target |
+| `update_targets` | 全量覆盖所有 target。省略 text 时保留现有主 target，只替换次 target。带 text 且 autoContinue=false 时同样进入 goal 模式；autoContinue=true 时自动跳过主 target（部分失败），只覆盖次 target |
 | `list` | 列出所有 target 及状态 |
 
-### /goal 命令（仅用户触发）
+### /goal 与 /goal-auto 命令（仅用户触发）
 
 | 用法 | 效果 |
 |------|------|
-| `/goal <text>` | 设置不可变主 target + 激活 auto-continue + 空闲时立即发送目标文本（启动首轮工作） |
-| `/goal on` | 重新激活 auto-continue（primary 重置为 active）+ 空闲时立即发送 primary 文本（恢复工作） |
-| `/goal off` | 关闭 auto-continue（primary 保留，agent 可修改） |
-| `/goal` | 显示当前状态 |
+| `/goal <text>` | 设置不可变主 target + 激活 auto-continue（**goal 模式**：ask_user 不设超时）+ 空闲时立即发送目标文本（启动首轮工作） |
+| `/goal-auto <text>` | 同 `/goal`，但为 **goal-auto 模式**：ask_user 超时封顶 60s（无人应答时 agent 用 fallback 继续，不卡自主循环） |
+| `/goal on` / `/goal-auto on` | 重新激活 auto-continue（primary 重置为 active，模式按命令名）+ 空闲时立即发送 primary 文本（恢复工作） |
+| `/goal off` / `/goal-auto off` | 关闭 auto-continue（primary 保留，agent 可修改） |
+| `/goal` / `/goal-auto` | 显示当前状态（goal-auto 时有标记） |
 
-> **立即发送**：`/goal <text>` 与 `/goal on` 在 agent 空闲（`isIdle`）时会立即 `sendUserMessage` 发送目标文本，触发首轮工作；agent 正在流式输出时跳过，由 guard 在 `agent_settled` 时注入续跑消息接手（避免与 guard 的 `followUp` 重复注入）。
+> **立即发送**：`/goal <text>`、`/goal-auto <text>`、`/goal on`、`/goal-auto on` 在 agent 空闲（`isIdle`）时会立即 `sendUserMessage` 发送目标文本，触发首轮工作；agent 正在流式输出时跳过，由 guard 在 `agent_settled` 时注入续跑消息接手（避免与 guard 的 `followUp` 重复注入）。
 
 ### 状态流转
 
 ```
-/goal <text>      → primary={active}, autoContinue=true + 空闲时立即发送目标文本（主 target 锁定，set 被拒绝）
-autoContinue=true → agent 可 add/update，不可 set
+/goal <text>       → primary={active}, autoContinue=true, cap=false（goal 模式）+ 空闲时立即发送目标文本（主 target 锁定，set 被拒绝）
+/goal-auto <text>  → primary={active}, autoContinue=true, cap=true（goal-auto 模式：ask_user 60s 封顶）+ 同上
+agent set/update_targets(带 text) → 同 /goal <text>（自动进入 goal 模式，cap=false）
+autoContinue=true  → agent 可 add/update，不可 set
 update id=0 completed/failed → autoContinue=false（主 target 解锁）
-/goal off         → autoContinue=false（主 target 解锁）
-/goal on          → primary={active}, autoContinue=true + 空闲时立即发送 primary 文本（主 target 重新锁定）
-Escape (aborted)  → autoContinue=false（与 /goal off 相同）
+/goal off          → autoContinue=false（主 target 解锁）
+/goal on           → primary={active}, autoContinue=true, cap=false + 空闲时立即发送 primary 文本（主 target 重新锁定）
+/goal-auto on      → 同上但 cap=true
+Escape (aborted)   → autoContinue=false（与 /goal off 相同；用户主动中断时任何 auto-resume 检查都不触发）
 ```
 
 ## guard 扩展
@@ -117,7 +122,7 @@ Escape (aborted)  → autoContinue=false（与 /goal off 相同）
 
 1. **Escape 检测**（最高优先级）：最后一条 assistant 消息 `stopReason === "aborted"` → 关闭 target auto-continue，停止注入
 2. **后台任务**（task 扩展）：有运行中的 background tasks → task guard 注入提醒，跳过 target guard
-3. **Target auto-continue**：autoContinue=true && primary=active → 注入续跑消息（含 completion audit）
+3. **Target auto-continue**：autoContinue=true && primary=active → 注入续跑消息（含 completion audit + 「需要人接入/无法完成 → 直接置 failed」引导）。主 target 未达终态（completed/failed）前持续注入——会话只有在主 target 终态或用户主动中断时才会真正结束
 
 续跑消息作为新 user 消息追加到对话尾部（`deliverAs: "followUp"`），不触碰 system prompt，不破坏 API 前缀缓存。
 

@@ -89,6 +89,15 @@ class TargetManager {
     return state.autoContinue && state.primary?.status === "active";
   }
 
+  /**
+   * Whether the ask_user timeout cap applies (goal-auto mode).
+   * Only meaningful while auto-continue is active.
+   */
+  isAskUserTimeoutCapped(sessionId: string): boolean {
+    const state = this.getState(sessionId);
+    return state.autoContinue && state.askUserTimeoutCap;
+  }
+
   // ---------------------------------------------------------------------------
   // Mutations (all persist to disk)
   // ---------------------------------------------------------------------------
@@ -97,6 +106,11 @@ class TargetManager {
    * Set or update the primary target text.
    *
    * Rejected when auto-continue is active (the primary is locked by user).
+   *
+   * Setting the primary target automatically enters goal mode (equivalent to
+   * `/goal <text>`): auto-continue is activated and the primary is locked
+   * until it reaches a terminal state (completed/failed). The ask_user
+   * timeout cap is NOT enabled (goal mode, not goal-auto).
    */
   async setPrimary(
     sessionId: string,
@@ -118,12 +132,18 @@ class TargetManager {
       text,
       status: "active",
     };
+    // Enter goal mode: auto-continue until the primary reaches a terminal
+    // state. Not goal-auto — ask_user keeps the configured timeout (no cap).
+    state.autoContinue = true;
+    state.askUserTimeoutCap = false;
 
     await this.persist(sessionId, state);
     this.emitChange(sessionId);
     return {
       state,
-      message: `Primary target set: ${text}`,
+      message:
+        `Primary target set: ${text}. Goal mode activated — the session will ` +
+        "auto-resume until this target is completed or failed.",
     };
   }
 
@@ -262,6 +282,10 @@ class TargetManager {
       skipped.push("primary (locked by user)");
     } else if (primaryText) {
       state.primary = { id: PRIMARY_ID, text: primaryText, status: "active" };
+      // Any agent-initiated primary set enters goal mode (equivalent to
+      // `/goal <text>`): auto-continue until terminal state. Not goal-auto.
+      state.autoContinue = true;
+      state.askUserTimeoutCap = false;
     }
     // If primaryText is null/undefined and auto-continue is off, the existing
     // primary is preserved (not cleared).
@@ -295,8 +319,13 @@ class TargetManager {
   /**
    * User sets a primary target and activates auto-continue.
    * `/goal <text>` — creates/overwrites the primary, turns auto-continue on.
+   * `/goal-auto <text>` — same, plus the ask_user timeout cap (goal-auto mode).
    */
-  async goalSet(sessionId: string, text: string): Promise<TargetResult> {
+  async goalSet(
+    sessionId: string,
+    text: string,
+    askUserTimeoutCap = false,
+  ): Promise<TargetResult> {
     const state = this.getState(sessionId);
     state.primary = {
       id: PRIMARY_ID,
@@ -304,6 +333,7 @@ class TargetManager {
       status: "active",
     };
     state.autoContinue = true;
+    state.askUserTimeoutCap = askUserTimeoutCap;
 
     await this.persist(sessionId, state);
     this.emitChange(sessionId);
@@ -336,9 +366,13 @@ class TargetManager {
 
   /**
    * User re-activates auto-continue for an existing primary target.
-   * `/goal on` — resets primary to active, turns auto-continue on.
+   * `/goal on` — resets primary to active, turns auto-continue on (goal mode).
+   * `/goal-auto on` — same, plus the ask_user timeout cap (goal-auto mode).
    */
-  async goalOn(sessionId: string): Promise<TargetResult> {
+  async goalOn(
+    sessionId: string,
+    askUserTimeoutCap = false,
+  ): Promise<TargetResult> {
     const state = this.getState(sessionId);
 
     if (!state.primary) {
@@ -350,6 +384,7 @@ class TargetManager {
 
     state.primary.status = "active";
     state.autoContinue = true;
+    state.askUserTimeoutCap = askUserTimeoutCap;
 
     await this.persist(sessionId, state);
     this.emitChange(sessionId);
@@ -383,9 +418,13 @@ class TargetManager {
       lines.push("No primary target set.");
     } else {
       const p = state.primary;
-      lines.push(
-        `Primary [${p.status}]${state.autoContinue ? " (auto-continue ON)" : ""}: ${p.text}`,
-      );
+      const mode =
+        state.autoContinue
+          ? state.askUserTimeoutCap
+            ? " (auto-continue ON, goal-auto)"
+            : " (auto-continue ON)"
+          : "";
+      lines.push(`Primary [${p.status}]${mode}: ${p.text}`);
       if (p.note) lines.push(`  note: ${p.note}`);
     }
 

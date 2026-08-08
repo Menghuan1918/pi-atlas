@@ -132,6 +132,10 @@ function normalizeState(data: unknown): TargetState {
     state.autoContinue = stateObj.autoContinue;
   }
 
+  if (typeof stateObj.askUserTimeoutCap === "boolean") {
+    state.askUserTimeoutCap = stateObj.askUserTimeoutCap;
+  }
+
   return state;
 }
 

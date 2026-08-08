@@ -324,9 +324,9 @@ console.log("\n--- TUI multi-question (mode=tui) ---");
 }
 
 // ---------------------------------------------------------------------------
-// Goal-active timeout cap (auto-continue → askuser timeout capped at 60s)
+// Timeout cap: goal mode → NO cap (infinite wait); goal-auto mode → 60s cap
 // ---------------------------------------------------------------------------
-console.log("\n--- Goal-active timeout cap ---");
+console.log("\n--- Goal / goal-auto timeout behavior ---");
 
 /** Run one input question; return the timeout option passed to ctx.ui.input. */
 async function inputTimeout(): Promise<unknown> {
@@ -343,26 +343,33 @@ async function inputTimeout(): Promise<unknown> {
 	assert(await inputTimeout() === undefined, "auto-continue off + config 0 → no timeout");
 }
 
-// 20. config 0 + auto-continue ON → capped to 60s.
+// 20. config 0 + goal mode (auto-continue ON, no cap) → NO timeout (infinite).
 {
 	setConfig(0);
-	await targetManager.goalSet(sessionId, "do the thing");
-	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 60000 }), "auto-continue on + config 0 → 60s");
+	await targetManager.goalSet(sessionId, "do the thing", false);
+	assert(await inputTimeout() === undefined, "goal mode + config 0 → no timeout (infinite)");
 }
 
-// 21. config 30 + auto-continue ON → stays 30s (cap only lowers).
+// 21. goal-auto: config 0 → capped to 60s.
+{
+	setConfig(0);
+	await targetManager.goalSet(sessionId, "do the thing", true);
+	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 60000 }), "goal-auto + config 0 → 60s");
+}
+
+// 22. goal-auto: config 30 → stays 30s (cap only lowers).
 {
 	setConfig(30);
-	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 30000 }), "auto-continue on + config 30 → 30s (not raised)");
+	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 30000 }), "goal-auto + config 30 → 30s (not raised)");
 }
 
-// 22. config 120 + auto-continue ON → capped to 60s.
+// 23. goal-auto: config 120 → capped to 60s.
 {
 	setConfig(120);
-	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 60000 }), "auto-continue on + config 120 → 60s (lowered)");
+	assert(JSON.stringify(await inputTimeout()) === JSON.stringify({ timeout: 60000 }), "goal-auto + config 120 → 60s (lowered)");
 }
 
-// 23. config 120 + auto-continue OFF → 120s (no cap when goal inactive).
+// 24. config 120 + auto-continue OFF → 120s (no cap when goal inactive).
 {
 	setConfig(120);
 	await targetManager.goalOff(sessionId);

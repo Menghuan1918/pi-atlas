@@ -22,10 +22,14 @@ import { showMultiQuestion, type MultiQuestion } from "./multi-question";
 import { targetManager } from "../target/target-manager.js";
 
 /**
- * When goal/auto-continue is active, the agent is expected to work
- * autonomously — an infinite AskUser wait would stall the continuation
- * loop. Cap the timeout at this value so the user gets a window to answer,
- * then the agent proceeds with the fallback answer.
+ * When goal-auto mode is active (user ran `/goal-auto`), the agent is
+ * expected to work autonomously — an infinite AskUser wait would stall the
+ * continuation loop. Cap the timeout at this value so the user gets a window
+ * to answer, then the agent proceeds with the fallback answer.
+ *
+ * Goal mode (`/goal` or agent-set primary) does NOT cap: ask_user uses the
+ * configured timeout as-is (0 = wait indefinitely) so the agent waits for the
+ * user when it needs input.
  */
 const GOAL_ACTIVE_TIMEOUT_CAP_S = 60;
 
@@ -121,11 +125,12 @@ export default function askUserExtension(pi: ExtensionAPI): void {
 			const sid = ctx.sessionManager.getSessionId();
 			let timeoutSeconds = loadTimeoutConfig(sid);
 
-			// When goal/auto-continue is active, cap the timeout so an unanswered
-			// question can't stall the autonomous loop. This only ever *lowers*
-			// the configured timeout: 0 (infinite) → 60s, and any config > 60 → 60s;
-			// a shorter configured timeout (e.g. 30s) is left untouched.
-			if (targetManager.isAutoContinueActive(sid)) {
+			// When goal-auto mode is active (user ran `/goal-auto`), cap the timeout
+			// so an unanswered question can't stall the autonomous loop. This only
+			// ever *lowers* the configured timeout: 0 (infinite) → 60s, and any
+			// config > 60 → 60s; a shorter configured timeout (e.g. 30s) is left
+			// untouched. In goal mode (`/goal` or agent-set primary) no cap applies.
+			if (targetManager.isAskUserTimeoutCapped(sid)) {
 				timeoutSeconds = Math.min(
 					timeoutSeconds > 0 ? timeoutSeconds : Infinity,
 					GOAL_ACTIVE_TIMEOUT_CAP_S,

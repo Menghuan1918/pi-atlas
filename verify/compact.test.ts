@@ -44,7 +44,7 @@ process.env.PI_ATLAS_DIR = tmpDir;
 // ---------- pure helpers ----------
 
 console.log("formatTargets:");
-const emptyState: TargetState = { primary: null, secondary: [], autoContinue: false };
+const emptyState: TargetState = { primary: null, secondary: [], autoContinue: false, askUserTimeoutCap: false };
 assert(formatTargets(null) === "", "null → empty block");
 assert(formatTargets(emptyState) === "", "empty state → empty block");
 const state: TargetState = {
@@ -54,6 +54,7 @@ const state: TargetState = {
 		{ id: 2, text: "wire symlink", status: "active" },
 	],
 	autoContinue: true,
+	askUserTimeoutCap: false,
 };
 const tb = formatTargets(state);
 assert(tb.includes("build compact ext"), "includes primary goal");
@@ -219,6 +220,7 @@ const targetState: TargetState = {
 	primary: { id: 0, text: "the overarching goal", status: "active" },
 	secondary: [{ id: 1, text: "a sub-target", status: "active" }],
 	autoContinue: true,
+	askUserTimeoutCap: false,
 };
 writeFileSync(statePath, JSON.stringify({ sessionId: "compact-test", state: targetState }));
 

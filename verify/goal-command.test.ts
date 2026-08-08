@@ -41,19 +41,17 @@ interface Sent {
 }
 
 /**
- * Minimal mock pi: captures the registered `/goal` command handler and records
- * every `sendUserMessage` call.
+ * Minimal mock pi: captures the registered `/goal` + `/goal-auto` command
+ * handlers and records every `sendUserMessage` call.
  */
 function createMockPi() {
   const sent: Sent[] = [];
-  let goalHandler:
-    | ((args: string, ctx: any) => Promise<void>)
-    | null = null;
+  const goalHandlers = new Map<string, (args: string, ctx: any) => Promise<void>>();
   const pi = {
     registerTool: () => {},
     on: () => {},
     registerCommand: (name: string, def: any) => {
-      if (name === "goal") goalHandler = def.handler;
+      if (name === "goal" || name === "goal-auto") goalHandlers.set(name, def.handler);
     },
     sendUserMessage: (content: string, opts?: { deliverAs?: string }) => {
       sent.push({ content, opts });
@@ -62,7 +60,8 @@ function createMockPi() {
   return {
     pi: pi as unknown as ExtensionAPI,
     sent,
-    getGoalHandler: () => goalHandler,
+    getGoalHandler: () => goalHandlers.get("goal") ?? null,
+    getGoalAutoHandler: () => goalHandlers.get("goal-auto") ?? null,
   };
 }
 
@@ -78,9 +77,12 @@ function createMockCtx(idle: boolean) {
 async function main(): Promise<void> {
   await targetManager.restoreSession(sessionId);
 
-  const { pi, sent, getGoalHandler } = createMockPi();
-  targetExtension(pi); // registers the /goal command
+  const { pi, sent, getGoalHandler, getGoalAutoHandler } = createMockPi();
+  targetExtension(pi); // registers the /goal + /goal-auto commands
   const goal = getGoalHandler()!;
+  const goalAuto = getGoalAutoHandler()!;
+  assert(goal !== null, "/goal command registered");
+  assert(goalAuto !== null, "/goal-auto command registered");
 
   console.log("/goal command handler tests\n");
 
@@ -116,6 +118,59 @@ async function main(): Promise<void> {
   assert(
     targetManager.isAutoContinueActive(sessionId) === true,
     "auto-continue activated",
+  );
+  assert(
+    targetManager.isAskUserTimeoutCapped(sessionId) === false,
+    "/goal → goal mode, no ask_user timeout cap",
+  );
+
+  // ── /goal-auto <text> while idle → sends goal text immediately + cap ─
+  console.log("\n/goal-auto <text> (idle):");
+  sent.length = 0;
+  await goalAuto("Automate the nightly run", createMockCtx(true));
+  assert(sent.length === 1, "/goal-auto sends exactly one message when idle");
+  assert(
+    sent[0]?.content.includes("Automate the nightly run"),
+    "/goal-auto wrapped message includes the goal text",
+  );
+  assert(
+    targetManager.getState(sessionId).primary?.text === "Automate the nightly run",
+    "/goal-auto sets primary target",
+  );
+  assert(
+    targetManager.isAutoContinueActive(sessionId) === true,
+    "/goal-auto activates auto-continue",
+  );
+  assert(
+    targetManager.isAskUserTimeoutCapped(sessionId) === true,
+    "/goal-auto → goal-auto mode, ask_user timeout cap on",
+  );
+
+  // ── /goal-auto on → re-activates goal-auto; /goal on → back to goal ──
+  console.log("\n/goal-auto on vs /goal on:");
+  await targetManager.goalOff(sessionId);
+  await goalAuto("on", createMockCtx(false));
+  assert(
+    targetManager.isAskUserTimeoutCapped(sessionId) === true,
+    "/goal-auto on restores goal-auto mode (cap on)",
+  );
+  await targetManager.goalOff(sessionId);
+  await goal("on", createMockCtx(false));
+  assert(
+    targetManager.isAskUserTimeoutCapped(sessionId) === false,
+    "/goal on restores goal mode (cap off)",
+  );
+
+  // ── /goal-auto off → disables auto-continue like /goal off ──────────
+  console.log("\n/goal-auto off:");
+  await goalAuto("off", createMockCtx(true));
+  assert(
+    targetManager.isAutoContinueActive(sessionId) === false,
+    "/goal-auto off disables auto-continue",
+  );
+  assert(
+    targetManager.getState(sessionId).primary !== null,
+    "/goal-auto off keeps primary target",
   );
 
   // ── /goal <text> while streaming (not idle) → no immediate send ────

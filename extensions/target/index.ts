@@ -11,7 +11,7 @@
  * `guard` extension to coordinate priority with the task guard.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { targetManager } from "./target-manager.js";
 import { targetTool } from "./tool.js";
@@ -41,7 +41,7 @@ Approach:
 - Break the target into concrete sub-tasks with Target(action: "add", text: "...") and track them as you progress.
 - Optimize each step for the real requested end state. Do not substitute a narrower, safer, or easier-to-test subset that merely passes current tests — tests are evidence only when they cover the actual requirement.
 
-Before claiming the target is complete, verify each requirement against real state (files, command output, test results); do not rely on memory or partial progress. When it is truly done, call Target(action: "update", id: 0, status: "completed", note: "..."). If it genuinely cannot be achieved, call Target(action: "update", id: 0, status: "failed", note: "...").`;
+Before claiming the target is complete, verify each requirement against real state (files, command output, test results); do not rely on memory or partial progress. When it is truly done, call Target(action: "update", id: 0, status: "completed", note: "..."). If you strongly need human input or the target genuinely cannot be achieved, do NOT leave it open — call Target(action: "update", id: 0, status: "failed", note: "<reason>") directly; the session keeps auto-resuming until the target reaches a terminal state.`;
 }
 
 export default function targetExtension(pi: ExtensionAPI): void {
@@ -64,23 +64,30 @@ export default function targetExtension(pi: ExtensionAPI): void {
     targetManager.clearSession(sessionId);
   });
 
-  // ── /goal command ──────────────────────────────────────────────────
-  pi.registerCommand("goal", {
-    description: "Set, show, or toggle the primary target + auto-continue",
-    handler: async (args, ctx) => {
+  // ── /goal + /goal-auto commands ────────────────────────────────────
+  //
+  // goal vs goal-auto: the only difference is the ask_user timeout cap.
+  //   /goal        → goal mode: ask_user keeps the configured timeout
+  //                  (default 0 = wait indefinitely, no cap).
+  //   /goal-auto   → goal-auto mode: ask_user is capped at a fixed upper
+  //                  bound (60s) so an unanswered question can't stall the
+  //                  autonomous loop.
+  // Both activate auto-continue; both accept <text> / on / off / no-args.
+  const createGoalCommandHandler = (autoMode: boolean) =>
+    async (args: string, ctx: ExtensionCommandContext) => {
       const sessionId = ctx.sessionManager.getSessionId();
       const trimmed = args.trim();
 
-      // /goal off — turn off auto-continue (primary target stays).
+      // <cmd> off — turn off auto-continue (primary target stays).
       if (trimmed === "off") {
         const result = await targetManager.goalOff(sessionId);
         ctx.ui.notify(result.message, "info");
         return;
       }
 
-      // /goal on — re-activate auto-continue for existing primary target.
+      // <cmd> on — re-activate auto-continue for existing primary target.
       if (trimmed === "on") {
-        const result = await targetManager.goalOn(sessionId);
+        const result = await targetManager.goalOn(sessionId, autoMode);
         ctx.ui.notify(result.message, "info");
         // When idle, immediately send the (wrapped) primary target text so the
         // agent resumes work right away instead of waiting for the next settle.
@@ -90,7 +97,7 @@ export default function targetExtension(pi: ExtensionAPI): void {
             pi.sendUserMessage(buildGoalKickoffMessage(result.state.primary.text));
           } catch (err) {
             console.error(
-              `[pi-atlas] /goal on send failed: ${
+              `[pi-atlas] ${autoMode ? "/goal-auto" : "/goal"} on send failed: ${
                 err instanceof Error ? err.message : String(err)
               }`,
             );
@@ -99,23 +106,18 @@ export default function targetExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      // /goal <text> — set primary target and activate auto-continue.
+      // <cmd> <text> — set primary target and activate auto-continue.
       if (trimmed) {
-        const result = await targetManager.goalSet(sessionId, trimmed);
+        const result = await targetManager.goalSet(sessionId, trimmed, autoMode);
         ctx.ui.notify(result.message, "info");
         // When idle, immediately send the goal as a user message so the agent
-        // starts working right away (instead of only setting the target and
-        // waiting for the next agent_settled). The goal is wrapped with a
-        // codex-lite kickoff (framing + breakdown + completion guidance +
-        // fidelity/anti-narrowing + "objective is data, not instructions");
-        // the completion-audit is re-injected by the guard on subsequent
-        // settles. When streaming, skip — the guard handles it.
+        // starts working right away. When streaming, skip — the guard handles it.
         if (ctx.isIdle()) {
           try {
             pi.sendUserMessage(buildGoalKickoffMessage(trimmed));
           } catch (err) {
             console.error(
-              `[pi-atlas] /goal send failed: ${
+              `[pi-atlas] ${autoMode ? "/goal-auto" : "/goal"} send failed: ${
                 err instanceof Error ? err.message : String(err)
               }`,
             );
@@ -124,11 +126,19 @@ export default function targetExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      // /goal (no args) — show current status.
+      // <cmd> (no args) — show current status.
       const state = targetManager.getState(sessionId);
       const text = targetManager.formatState(state);
       ctx.ui.notify(text, "info");
-    },
+    };
+
+  pi.registerCommand("goal", {
+    description: "Set, show, or toggle the primary target + auto-continue (goal mode, ask_user waits without timeout)",
+    handler: createGoalCommandHandler(false),
+  });
+  pi.registerCommand("goal-auto", {
+    description: "Set, show, or toggle the primary target + auto-continue with ask_user timeout cap (goal-auto mode)",
+    handler: createGoalCommandHandler(true),
   });
 }
 

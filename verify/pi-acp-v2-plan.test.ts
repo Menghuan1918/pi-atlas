@@ -64,11 +64,11 @@ async function main(): Promise<void> {
   console.log("isTargetStateEmpty");
   check(isTargetStateEmpty(defaultTargetState()) === true, "default state is empty");
   check(
-    isTargetStateEmpty({ primary: { id: 0, text: "p", status: "active" }, secondary: [], autoContinue: false }) === false,
+    isTargetStateEmpty({ primary: { id: 0, text: "p", status: "active" }, secondary: [], autoContinue: false, askUserTimeoutCap: false }) === false,
     "state with primary is not empty",
   );
   check(
-    isTargetStateEmpty({ primary: null, secondary: [{ id: 1, text: "s", status: "active" }], autoContinue: false }) === false,
+    isTargetStateEmpty({ primary: null, secondary: [{ id: 1, text: "s", status: "active" }], autoContinue: false, askUserTimeoutCap: false }) === false,
     "state with secondary only is not empty",
   );
 
@@ -88,6 +88,7 @@ async function main(): Promise<void> {
         { id: 2, text: "step two", status: "failed", note: "blocked" },
       ],
       autoContinue: true,
+      askUserTimeoutCap: false,
     };
     const u = toPlanUpdate(state) as {
       sessionUpdate: string;
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
       primary: null,
       secondary: [{ id: 1, text: "only", status: "active" }],
       autoContinue: false,
+      askUserTimeoutCap: false,
     };
     const u = toPlanUpdate(state) as { plan: { entries: Array<{ content: string; _meta?: { id: number } }> } };
     check(u.plan.entries.length === 1, "1 entry (secondary only)");
@@ -150,7 +152,8 @@ async function main(): Promise<void> {
   check(emitted[0].sessionId === sid, "emit payload sessionId matches");
   check(emitted[0].state.primary?.text === "primary goal", "emit payload state.primary.text");
   check(emitted[0].state.primary?.status === "active", "emit payload state.primary.status=active");
-  check(emitted[0].state.autoContinue === false, "autoContinue=false after setPrimary");
+  check(emitted[0].state.autoContinue === true, "autoContinue=true after setPrimary (goal mode)");
+  check(emitted[0].state.askUserTimeoutCap === false, "askUserTimeoutCap=false after setPrimary (goal mode, not goal-auto)");
   // payload is a clone: mutating it must not affect the manager's in-memory state
   emitted[0].state.primary!.text = "MUTATED";
   check(targetManager.getState(sid).primary?.text === "primary goal", "emit payload is a deep clone (manager unaffected)");
@@ -177,11 +180,13 @@ async function main(): Promise<void> {
   check(emitted.length === 5, "replaceTargets emits");
   check(emitted[4].state.primary?.text === "new primary", "emit replaced primary");
   check(emitted[4].state.secondary.length === 2, "emit replaced secondaries");
+  check(emitted[4].state.autoContinue === true, "replaceTargets with text enters goal mode");
 
   // /goal path: goalSet → emits (autoContinue=true)
   await targetManager.goalSet(sid, "goal via command");
   check(emitted.length === 6, "goalSet emits");
   check(emitted[5].state.autoContinue === true, "goalSet sets autoContinue=true");
+  check(emitted[5].state.askUserTimeoutCap === false, "goalSet default → goal mode (no cap)");
   check(emitted[5].state.primary?.text === "goal via command", "goalSet primary text");
 
   // setPrimary while auto-continue locked → NO state change → NO emit

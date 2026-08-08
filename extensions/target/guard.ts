@@ -69,7 +69,10 @@ function buildContinuationMessage(state: TargetState): string {
     "- The audit must PROVE completion, not merely fail to find remaining work.",
     "",
     'If the target is fully achieved, call Target(action: "update", id: 0, status: "completed", note: "...").',
-    'If it cannot be achieved, call Target(action: "update", id: 0, status: "failed", note: "...").',
+    "If you strongly need human input, or the target cannot be achieved, do NOT leave it open — ",
+    'call Target(action: "update", id: 0, status: "failed", note: "<reason>") directly.',
+    "An open primary target means the session keeps auto-resuming; it can only end when the target",
+    "reaches a terminal state (completed or failed) — unless the user interrupts.",
     "Otherwise, continue working toward it.",
   );
 

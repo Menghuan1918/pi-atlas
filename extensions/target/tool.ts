@@ -12,9 +12,10 @@
  *                     (locked by user); only secondary targets are replaced.
  *   list            — Show all targets and their current status.
  *
- * Auto-continue is controlled exclusively by the /goal command (user-only).
- * When active, the primary target text is immutable; the agent can still
- * complete/fail it and manage secondary targets freely.
+ * Auto-continue is activated by the /goal and /goal-auto commands (user-only)
+ * and automatically when the agent sets the primary target (goal mode —
+ * equivalent to /goal). While active, the primary target text is immutable;
+ * the agent can still complete/fail it and manage secondary targets freely.
  */
 
 import { StringEnum, Type, type Static } from "@earendil-works/pi-ai";
@@ -91,17 +92,19 @@ export const targetTool: ToolDefinition<typeof targetParameters, TargetToolDetai
       "Manage targets — a unified goal and todo system. " +
       "Set a primary target (id 0) that defines what to achieve, and add " +
       "secondary targets (id 1+) to track progress. " +
-      "When auto-continue is active (set by user via /goal), the primary " +
-      "target is locked: use 'update' with status 'completed' or 'failed' " +
-      "to finish it and turn off auto-continue.",
+      "Setting the primary target (set/update_targets) enters goal mode — the " +
+      "session auto-resumes until the primary reaches a terminal state: use " +
+      "'update' with status 'completed' or 'failed' to finish it and turn off " +
+      "auto-continue. While goal mode is active the primary text is locked " +
+      "(only the user can change it via /goal / /goal-auto).",
     promptSnippet:
       "Set primary target, add/update targets, full overwrite, or list all targets",
     promptGuidelines: [
-      "Use target(action: 'set', text: '...') to define the primary goal — what the user ultimately wants achieved.",
+      "Use target(action: 'set', text: '...') to define the primary goal — what the user ultimately wants achieved. Note: setting the primary enters goal mode (auto-resume until it is completed or failed; the text becomes locked).",
       "Use target(action: 'add', text: '...') to break the goal into trackable sub-tasks.",
       "Use target(action: 'update_targets', text: '...', secondary: [{text: '...', status: '...'}, ...]) to replace all targets at once. Omit text to update only secondary targets (existing primary is preserved).",
       "Use target(action: 'update', id: <id>, status: 'completed') to mark a target done. For id 0, this also stops auto-continue. status is optional — you can also update just text or note.",
-      "Use target(action: 'update', id: 0, status: 'failed', note: '...') if the goal cannot be achieved.",
+      "Use target(action: 'update', id: 0, status: 'failed', note: '...') if the goal cannot be achieved or you strongly need human input — do not leave the primary target open.",
       "Use target(action: 'list') to review all targets and their current status.",
     ],
     parameters: targetParameters,

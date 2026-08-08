@@ -10,10 +10,10 @@ LLM 编码 Agent 在一轮结束时就会停下。对于 infra 工作——凌�
 
 pi-atlas 把 pi 变成这样的 Agent。四个扩展组成一个自驱动闭环：
 
-- **定目标，放手不管。** `/goal <文本>` 锁定一个目标并开启自动续跑。Agent 跨任意多轮朝它推进，并拆成可跟踪的待办清单。
+- **定目标，放手不管。** `/goal <文本>` 锁定一个目标并开启自动续跑。Agent 跨任意多轮朝它推进，并拆成可跟踪的待办清单。会话只有目标被标记 `completed`/`failed`（或你主动中断）后才会真正结束。
 - **默认异步。** 长命令（构建、测试、部署、`kubectl logs -f`）作为后台 `bash` 任务运行，立即返回并流式输出末尾内容 + 退出码——不再被 60 秒超时打断半截部署。
 - **委托而非臃肿。** `create_agent` 派生子代理（`explorer`、`code-reviewer`、`general`）在隔离会话中并行运行，回传压缩摘要，让主上下文保持精简。嵌套深度有界（`PI_ATLAS_TASK_DEPTH`，上限 3），不会失控。
-- **只在关键处提问。** 当 Agent 需要决策时，`ask_user` 阻塞当前轮并触发一张带「打开会话」按钮的飞书卡片。目标激活期间，未回答的问题会在 60 秒后超时，避免夜间运行卡死。
+- **只在关键处提问。** 当 Agent 需要决策时，`ask_user` 阻塞当前轮并触发一张带「打开会话」按钮的飞书卡片。goal 模式（`/goal` 或 Agent 设置主目标）下 Agent 会一直等待你的回答；goal-auto 模式（`/goal-auto`）下未回答的问题会在 60 秒后超时，避免夜间运行卡死。
 - **循环，而不是停摆。** 每次 `agent_settled`，guard 协调器按严格优先级决定下一步——被中断 → 暂停并把控制权交还用户；仍有后台任务 → 提示 Agent 去等待它们；目标激活 → 注入带完成审计的续跑消息。只有真的无事可做时，才通知「会话结束」并真正空闲。
 
 整个闭环是事件驱动的：它挂在 pi 的生命周期事件（`tool_call`、`turn_end`、`agent_settled`）上，以普通 follow-up 用户消息形式注入续跑——绝不触碰 system prompt，所以供应商的前缀缓存在整段长任务中保持有效。
@@ -85,16 +85,19 @@ pi-atlas 是一组相互独立的 pi 扩展。每个扩展是 `extensions/` 下�
 
 **target** 分为 `primary`（id 0，驱动自动续跑）和 `secondary`（id 1+，用于进度追踪）。状态按会话持久化到 `~/.pi/atlas/sessions/<sessionId>/target/state.json`。
 
-`/goal` 命令（仅用户触发）设置主目标并切换自动续跑：
+`/goal` 与 `/goal-auto` 命令（仅用户触发）设置主目标并切换自动续跑：
 
 | 用法 | 效果 |
 |------|------|
-| `/goal <text>` | 设置主目标 + 激活自动续跑 + 空闲时立即发送目标文本 |
-| `/goal on` | 为现有主目标重新激活自动续跑 + 空闲时立即恢复 |
-| `/goal off` | 关闭自动续跑（主目标保留） |
-| `/goal` | 显示当前状态 |
+| `/goal <text>` | 设置主目标 + 激活自动续跑（**goal 模式**：ask_user 无限等待，不设超时）+ 空闲时立即发送目标文本 |
+| `/goal-auto <text>` | 同上，但为 **goal-auto 模式**：ask_user 超时封顶 60 秒，无人应答不卡自主循环 |
+| `/goal on` / `/goal-auto on` | 为现有主目标重新激活自动续跑（模式按命令名）+ 空闲时立即恢复 |
+| `/goal off` / `/goal-auto off` | 关闭自动续跑（主目标保留） |
+| `/goal` / `/goal-auto` | 显示当前状态 |
 
-自动续跑激活时，`guard` 扩展在每次 `agent_settled` 重新注入一条带完成审计的续跑消息，直到主目标被标记为 `completed` 或 `failed`。
+Agent 侧设置主目标（`set` 或带 text 的 `update_targets`）会自动进入 goal 模式——与 `/goal <text>` 相同：主目标锁定，直到 Agent 将其标记为 `completed` 或 `failed`。
+
+自动续跑激活时，`guard` 扩展在每次 `agent_settled` 重新注入一条带完成审计的续跑消息，直到主目标达到终态。续跑消息明确指示：强烈需要人接入或无法完成时，直接把主目标置为 `failed`——开放的主目标会让会话持续自动续跑。
 
 ### Bash 超时 (`extensions/bash-timeout/`)
 
@@ -222,7 +225,7 @@ ln -s /path/to/pi-atlas/extensions/guard         ~/.pi/agent/extensions/guard
 
 **飞书通知（guard）。** 创建 `~/.pi/atlas/notify.json` 填入 webhook（见上文 Guard 小节）。未配置时静默关闭通知。
 
-**AskUser 超时。** `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` 在 `session_start` 时创建，默认 `{"timeout": 0}`（0 = 无限等待）。`goal`/自动续跑激活时，超时封顶 60 秒，避免无人应答卡住自主循环。每次调用重新读取，其他扩展可随时覆盖写入。
+**AskUser 超时。** `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` 在 `session_start` 时创建，默认 `{"timeout": 0}`（0 = 无限等待）。goal 模式（`/goal` 或 Agent 设置主目标）按配置原值执行，**不设超时**；只有 goal-auto 模式（`/goal-auto`）把超时封顶 60 秒，避免无人应答卡住自主循环。每次调用重新读取，其他扩展可随时覆盖写入。
 
 **Agent 嵌套深度。** 设置环境变量 `PI_ATLAS_TASK_DEPTH`。顶层会话默认 0，每层 agent 子进程递增 1。超过 `MAX_AGENT_DEPTH`（默认 3）的任务会被拒绝。
 

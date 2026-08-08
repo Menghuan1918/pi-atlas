@@ -49,6 +49,19 @@ export interface TargetState {
    * reaches a terminal state (completed/failed), this is set to false.
    */
   autoContinue: boolean;
+  /**
+   * Whether the ask_user timeout cap applies (goal-auto mode).
+   *
+   * - `false` — goal mode (default): ask_user uses the configured timeout
+   *   as-is (0 = wait indefinitely). Activated by `/goal` and by the agent
+   *   setting the primary target.
+   * - `true` — goal-auto mode: ask_user is capped at a fixed upper bound so
+   *   an unanswered question cannot stall the autonomous loop. Activated by
+   *   `/goal-auto` only.
+   *
+   * Only meaningful while `autoContinue` is true.
+   */
+  askUserTimeoutCap: boolean;
 }
 
 /**
@@ -59,6 +72,7 @@ export function defaultTargetState(): TargetState {
     primary: null,
     secondary: [],
     autoContinue: false,
+    askUserTimeoutCap: false,
   };
 }
 

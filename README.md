@@ -10,10 +10,10 @@ LLM coding agents stop the moment a turn ends. For infra work — diagnosing an 
 
 pi-atlas turns pi into that kind of agent. Four extensions compose a self-driving loop:
 
-- **Set a goal, walk away.** `/goal <text>` locks an objective and switches on auto-continue. The agent works toward it across as many turns as needed, breaking it into a trackable checklist.
+- **Set a goal, walk away.** `/goal <text>` locks an objective and switches on auto-continue. The agent works toward it across as many turns as needed, breaking it into a trackable checklist. The session only truly ends once the goal is `completed` or `failed` (or you interrupt).
 - **Async by default.** Long commands (builds, tests, deploys, `kubectl logs -f`) run as background `bash` tasks that return instantly and stream live tail + exit status — no more 60s timeouts killing your deploy mid-flight.
 - **Delegate, don't bloat.** `create_agent` spawns sub-agents (`explorer`, `code-reviewer`, `general`) in isolated sessions that run in parallel, report back a compressed summary, and keep the main context lean. Nesting is bounded (`PI_ATLAS_TASK_DEPTH`, max 3) so it never runs away.
-- **Ask only when it matters.** When the agent needs a decision, `ask_user` blocks the turn and fires a Feishu card with an "open session" button. While a goal is active, unanswered questions time out at 60s so an overnight run never deadlocks.
+- **Ask only when it matters.** When the agent needs a decision, `ask_user` blocks the turn and fires a Feishu card with an "open session" button. In goal mode (`/goal` or agent-set target) the agent waits as long as needed for your answer; in goal-auto mode (`/goal-auto`) unanswered questions time out at 60s so an overnight run never deadlocks.
 - **Loop, don't settle.** On every `agent_settled`, a guard coordinator picks the next move in strict priority — aborted → pause and hand back control; background tasks still running → nudge the agent to await them; goal active → inject a continuation with a completion audit. Only when nothing is left does it notify "session ended" and truly idle.
 
 The whole loop is event-driven: it rides on pi's lifecycle events (`tool_call`, `turn_end`, `agent_settled`) and injects continuations as plain follow-up user messages — never touching the system prompt, so provider prefix caching stays intact across the long run.
@@ -85,16 +85,19 @@ Unified goal and todo management that also drives auto-continue.
 
 A **target** is either `primary` (id 0, drives auto-continue) or `secondary` (id 1+, for progress tracking). State persists per session to `~/.pi/atlas/sessions/<sessionId>/target/state.json`.
 
-The `/goal` command (user-only) sets the primary target and toggles auto-continue:
+The `/goal` and `/goal-auto` commands (user-only) set the primary target and toggle auto-continue:
 
 | Usage | Effect |
 |-------|--------|
-| `/goal <text>` | Set the primary target + activate auto-continue + send the goal immediately if idle |
-| `/goal on` | Re-activate auto-continue for the existing primary + resume immediately if idle |
-| `/goal off` | Turn off auto-continue (primary target retained) |
-| `/goal` | Show current status |
+| `/goal <text>` | Set the primary target + activate auto-continue (**goal mode** — ask_user waits without timeout) + send the goal immediately if idle |
+| `/goal-auto <text>` | Same, but **goal-auto mode** — ask_user is capped at 60s so an unanswered question can't stall the autonomous loop |
+| `/goal on` / `/goal-auto on` | Re-activate auto-continue for the existing primary (mode per command) + resume immediately if idle |
+| `/goal off` / `/goal-auto off` | Turn off auto-continue (primary target retained) |
+| `/goal` / `/goal-auto` | Show current status |
 
-When auto-continue is active, the `guard` extension re-injects a completion-audit message on each `agent_settled` until the primary target is marked `completed` or `failed`.
+Setting the primary target from the agent side (`set` or `update_targets` with text) automatically enters goal mode — the same as `/goal <text>`: the primary is locked until the agent marks it `completed` or `failed`.
+
+When auto-continue is active, the `guard` extension re-injects a completion-audit message on each `agent_settled` until the primary target reaches a terminal state. The continuation explicitly instructs the agent to fail the target directly when it strongly needs human input or cannot complete it — an open primary keeps the session auto-resuming.
 
 ### Bash Timeout (`extensions/bash-timeout/`)
 
@@ -237,7 +240,7 @@ ln -s /path/to/pi-atlas/extensions/guard        ~/.pi/agent/extensions/guard
 
 **Feishu notifications (guard).** Create `~/.pi/atlas/notify.json` with your webhook (see the Guard section above). Without it, notifications are silently disabled.
 
-**ask_user timeout.** `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` is created at `session_start` with `{"timeout": 0}` (0 = wait indefinitely). While `goal`/auto-continue is active, the timeout is capped at 60s so an unanswered question can't stall the autonomous loop. The file is re-read on every call, so other extensions can overwrite it mid-session.
+**ask_user timeout.** `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` is created at `session_start` with `{"timeout": 0}` (0 = wait indefinitely). Goal mode (`/goal` or agent-set target) uses the configured value as-is — no cap. Only goal-auto mode (`/goal-auto`) caps the timeout at 60s so an unanswered question can't stall the autonomous loop. The file is re-read on every call, so other extensions can overwrite it mid-session.
 
 **Agent nesting depth.** Set `PI_ATLAS_TASK_DEPTH` in the environment. The top-level session defaults to 0; each spawned agent increments by 1. Tasks exceeding `MAX_AGENT_DEPTH` (default 3) are rejected.
 
