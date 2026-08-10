@@ -147,7 +147,7 @@ How it works:
 Passive extension (no tools) that coordinates the `agent_settled` event and sends Feishu notifications. It depends on the `task` and `target` extensions (it imports their managers/guards), so load all three together.
 
 On `agent_settled`, guards run in priority order:
-1. **Escape / aborted** (highest) — if the last assistant turn was aborted, disable target auto-continue and stop.
+1. **Escape / aborted** (highest) — if the last assistant turn was aborted, disable target auto-continue and stop. The "stopped" notice is appended as a custom message without triggering a new turn, so the agent stays fully idle (abort = human taking over).
 2. **Background tasks** — if any background task is still running, inject a task reminder (skip the target guard).
 3. **Target auto-continue** — if active, inject a continuation message with a completion audit.
 4. **Otherwise (truly idle)** — send a Feishu "session ended" notification.

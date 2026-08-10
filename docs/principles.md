@@ -35,7 +35,7 @@ AGENT works (calls tools):
 
 AGENT finishes turn ──▶ pi emits agent_settled ──▶ guard coordinator picks next move:
 
-  1. aborted (Esc)?        → disable auto-continue + steer message → LOOP PAUSES, control → user
+  1. aborted (Esc)?        → disable auto-continue + notice (custom message, no new turn) → LOOP PAUSES, control → user
   2. background tasks ran? → followUp "await/cancel your tasks"   → AGENT CONTINUES
   3. goal active?          → followUp with target + ✓/✗ checklist + completion audit
                                                                   → AGENT CONTINUES
@@ -64,7 +64,7 @@ The loop is **event-driven**: it has no timer, no polling thread, no daemon. It 
 Two properties make the loop robust for long, unattended runs:
 
 **1. Continuations are plain user messages, not system-prompt edits.**
-Both guards inject their next-step message via `pi.sendUserMessage(text, { deliverAs: "followUp" })`. This appends a new user message at the conversation tail. The system prompt is never touched, so the provider's **prefix cache stays valid** across the entire multi-hour run. Escape/interrupt uses `deliverAs: "steer"`. The loop is cheap to keep alive.
+Both guards inject their next-step message via `pi.sendUserMessage(text, { deliverAs: "followUp" })`. This appends a new user message at the conversation tail. The system prompt is never touched, so the provider's **prefix cache stays valid** across the entire multi-hour run. The Escape path never starts a new turn — it appends a display-only custom message (`sendMessage`, `triggerTurn: false`) so aborting truly hands control back to the user. The loop is cheap to keep alive.
 
 **2. No background threads started speculatively.**
 The only long-lived resources are the user's own background tasks (`create_bash` / `create_agent`) and the OS processes they spawn. Extensions defer all resource startup to `session_start` or the tool/event that needs them, and tear down in `session_shutdown`. There is no heartbeat, no watcher loop, no timer that could leak or wedge.

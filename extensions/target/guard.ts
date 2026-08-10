@@ -110,9 +110,20 @@ export function createTargetGuardHandler(
           saveTargetState(sessionId, state),
         );
         try {
-          pi.sendUserMessage(
-            "Auto-continue stopped (interrupted). The primary target is still set — you can resume with /goal on.",
-            { deliverAs: "steer" },
+          // Deliver the notice WITHOUT starting a new turn: `sendUserMessage`
+          // always triggers a turn when the agent is idle, which would look
+          // like the agent auto-resuming right after an abort (and the LLM may
+          // even "continue working" in response). A display-only custom
+          // message keeps the agent truly idle — abort is the human taking
+          // over — while still telling the user how to resume.
+          pi.sendMessage(
+            {
+              customType: "target-pause",
+              content:
+                "Auto-continue stopped (interrupted). The primary target is still set — you can resume with /goal on.",
+              display: true,
+            },
+            { triggerTurn: false },
           );
         } catch {
           // Ignore injection errors — the state change is what matters.
