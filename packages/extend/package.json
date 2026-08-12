@@ -22,5 +22,8 @@
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

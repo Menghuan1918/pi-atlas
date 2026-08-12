@@ -96,18 +96,18 @@ if (spec !== "check") {
   console.log(`Versions in sync at ${current}. Use \`tsx scripts/release.ts patch|minor|major\` to bump.`);
 }
 
-// 3. Publish in dependency order.
+// 3. Publish in dependency order (scoped packages need explicit public access).
 if (dryRun) {
   console.log("[dry-run] publish plan:");
   for (const { dir } of PUBLISH_ORDER) {
     const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
-    console.log(`  npm publish  →  ${pkg.name}@${next}`);
+    console.log(`  npm publish --access public  →  ${pkg.name}@${next}`);
   }
   console.log(`[dry-run] tag: ${next !== current ? `v${next}` : "(no version change — no tag)"}`);
   process.exit(0);
 }
 for (const { dir } of PUBLISH_ORDER) {
-  run(`npm publish`, dir);
+  run(`npm publish --access public`, dir);
 }
 
 // 4. Tag the release.
