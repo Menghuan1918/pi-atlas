@@ -24,20 +24,20 @@ The whole loop is event-driven: it rides on pi's lifecycle events (`tool_call`, 
 
 ## Extensions at a glance
 
-pi-atlas is a collection of independent pi extensions. Each is a self-contained directory under `extensions/` and can be installed individually. They share a single runtime data root at `~/.pi/atlas/` (overridable via `PI_ATLAS_DIR`), scoped per session under `~/.pi/atlas/sessions/<sessionId>/`.
+pi-atlas is a collection of independent pi extensions, split into npm packages so you can install only what you need. All packages share one version number (published together). Each extension is a self-contained directory under `extensions/` inside its package. They share a single runtime data root at `~/.pi/atlas/` (overridable via `PI_ATLAS_DIR`), scoped per session under `~/.pi/atlas/sessions/<sessionId>/`.
 
-| Extension | Type | What it does |
-|-----------|------|--------------|
-| `task` | tools + guard | Background bash/agent task system (7 tools) |
-| `askuser` | tool | Ask the user questions and block for answers |
-| `target` | tool + command | Goal/todo management + `/goal` auto-continue |
-| `bash-timeout` | passive | Default timeouts for the built-in `bash` tool |
-| `compact` | passive | Higher-quality session compaction (replaces default summarization) |
-| `websearch` | tool | Server-side web search via an Anthropic-compatible provider |
-| `guard` | passive | Coordinates `agent_settled` + Feishu notifications |
-| `pi-acp-v2` | standalone server | Exposes pi as an ACP v2 agent over stdio (dev bridge, not a pi extension) |
+| Package | Extension | Type | What it does |
+|---------|-----------|------|--------------|
+| `@pi-atlas/base` (default) | `task` | tools + guard | Background bash/agent task system (7 tools) |
+| `@pi-atlas/base` (default) | `target` | tool + command | Goal/todo management + `/goal` auto-continue |
+| `@pi-atlas/base` (default) | `bash-timeout` | passive | Default timeouts for the built-in `bash` tool |
+| `@pi-atlas/base` (default) | `compact` | passive | Higher-quality session compaction (replaces default summarization) |
+| `@pi-atlas/base` (default) | `guard` | passive | Coordinates `agent_settled` + Feishu notifications |
+| `@pi-atlas/ask` | `askuser` | tool | Ask the user questions and block for answers |
+| `@pi-atlas/extend` | `websearch` | tool | Server-side web search via an Anthropic-compatible provider |
+| `pi-atlas` (meta) | all of the above | – | Everything in one package |
 
-### Task (`extensions/task/`)
+### Task (`@pi-atlas/base` → `extensions/task/`)
 
 Background task system unifying bash and agent execution. Seven tools:
 
@@ -60,7 +60,7 @@ Key features:
 - **Nesting depth control** — `PI_ATLAS_TASK_DEPTH` env var limits nested agent tasks (default max: 3).
 - **Usage tracking** — agent tasks accumulate token/cost stats from the sub-process.
 
-### ask_user (`extensions/askuser/`)
+### ask_user (`@pi-atlas/ask` → `extensions/askuser/`)
 
 Single tool that asks the user questions and blocks for answers:
 
@@ -75,7 +75,7 @@ Key features:
 - **Session-level timeout** — per-session config at `~/.pi/atlas/sessions/<sessionId>/askuser/config.json` (`{"timeout": 0}` where 0 = infinite wait). Re-read on every call; other extensions can overwrite the file to change the timeout mid-session.
 - **Non-interactive fallback** — returns an error in print/json modes.
 
-### Target (`extensions/target/`)
+### Target (`@pi-atlas/base` → `extensions/target/`)
 
 Unified goal and todo management that also drives auto-continue.
 
@@ -99,7 +99,7 @@ Setting the primary target from the agent side (`set` or `update_targets` with t
 
 When auto-continue is active, the `guard` extension re-injects a completion-audit message on each `agent_settled` until the primary target reaches a terminal state. The continuation explicitly instructs the agent to fail the target directly when it strongly needs human input or cannot complete it — an open primary keeps the session auto-resuming.
 
-### Bash Timeout (`extensions/bash-timeout/`)
+### Bash Timeout (`@pi-atlas/base` → `extensions/bash-timeout/`)
 
 Passive extension (no tools) that injects default timeouts for the built-in `bash` tool via two event handlers:
 
@@ -111,7 +111,7 @@ Passive extension (no tools) that injects default timeouts for the built-in `bas
 
 Purely passive interception — zero overhead when an explicit timeout is provided.
 
-### Compact (`extensions/compact/`)
+### Compact (`@pi-atlas/base` → `extensions/compact/`)
 
 Passive extension (no tools, no commands) that replaces pi's default session compaction with a higher-quality summarizer. It hooks the `session_before_compact` event and returns a **handoff document** (modeled on the `productivity/handoff` skill) built with the session's active model.
 
@@ -126,7 +126,7 @@ How it works:
 
 No configuration, no extra storage, no commands.
 
-### WebSearch (`extensions/websearch/`)
+### WebSearch (`@pi-atlas/extend` → `extensions/websearch/`)
 
 Single tool that searches the web for current/real-time information:
 
@@ -142,7 +142,7 @@ How it works:
 
 > The server-side `web_search` convention is shared by other Anthropic-compatible search endpoints (e.g. DeepSeek's `/anthropic` endpoint), so wiring additional providers is straightforward. Today only `macaron` is wired and verified.
 
-### Guard (`extensions/guard/`)
+### Guard (`@pi-atlas/base` → `extensions/guard/`)
 
 Passive extension (no tools) that coordinates the `agent_settled` event and sends Feishu notifications. It depends on the `task` and `target` extensions (it imports their managers/guards), so load all three together.
 
@@ -190,30 +190,34 @@ Set `PI_ACP_V2_FAKE_MODEL=1` to use a deterministic fake model (no LLM/auth/netw
 - The pi coding agent (`@earendil-works/pi-coding-agent`) and Node.js.
 - `npm install` in this repo to fetch dependencies (used by both the extensions and the `pi-acp-v2` bin).
 
-### Install the extensions
+### Install the extensions (npm packages)
 
-Each extension is a directory under `extensions/`. The recommended way is to install the published npm package and let pi load all of them via the `pi` manifest:
-
-**Via npm (recommended):**
+pi-atlas is split into npm packages — install only what you need, or everything at once via the meta package. The recommended way is `pi install` (writes to `~/.pi/agent/settings.json`):
 
 ```bash
+pi install npm:@pi-atlas/base        # recommended default: task+target+guard+bash-timeout+compact
+pi install npm:@pi-atlas/ask         # + ask_user (user questions)
+pi install npm:@pi-atlas/extend      # + WebSearch
+# everything at once:
 pi install npm:pi-atlas
-# or try it without installing:
-pi -e npm:pi-atlas
+# or try without installing:
+pi -e npm:@pi-atlas/base
 ```
+
+> `@pi-atlas/base` bundles `task`, `target`, `guard`, `bash-timeout`, and `compact`. `guard` imports the `task` and `target` managers/guards, so keeping them in one package avoids version-skew. `askuser` and `websearch` are independent and read target state (goal-auto timeout cap) through the shared `@pi-atlas/shared` helper package, which npm installs automatically.
 
 For development, symlink individual extension directories or list their paths in `settings.json`:
 
 **Via symlink (development):**
 
 ```bash
-ln -s /path/to/pi-atlas/extensions/task        ~/.pi/agent/extensions/task
-ln -s /path/to/pi-atlas/extensions/askuser     ~/.pi/agent/extensions/askuser
-ln -s /path/to/pi-atlas/extensions/target      ~/.pi/agent/extensions/target
-ln -s /path/to/pi-atlas/extensions/bash-timeout ~/.pi/agent/extensions/bash-timeout
-ln -s /path/to/pi-atlas/extensions/compact      ~/.pi/agent/extensions/compact
-ln -s /path/to/pi-atlas/extensions/websearch    ~/.pi/agent/extensions/websearch
-ln -s /path/to/pi-atlas/extensions/guard        ~/.pi/agent/extensions/guard
+ln -s /path/to/pi-atlas/packages/base/extensions/task         ~/.pi/agent/extensions/task
+ln -s /path/to/pi-atlas/packages/base/extensions/target      ~/.pi/agent/extensions/target
+ln -s /path/to/pi-atlas/packages/base/extensions/guard        ~/.pi/agent/extensions/guard
+ln -s /path/to/pi-atlas/packages/base/extensions/bash-timeout ~/.pi/agent/extensions/bash-timeout
+ln -s /path/to/pi-atlas/packages/base/extensions/compact      ~/.pi/agent/extensions/compact
+ln -s /path/to/pi-atlas/packages/ask/extensions/askuser       ~/.pi/agent/extensions/askuser
+ln -s /path/to/pi-atlas/packages/extend/extensions/websearch  ~/.pi/agent/extensions/websearch
 ```
 
 **Via `settings.json`:**
@@ -221,18 +225,18 @@ ln -s /path/to/pi-atlas/extensions/guard        ~/.pi/agent/extensions/guard
 ```json
 {
   "extensions": [
-    "/path/to/pi-atlas/extensions/task",
-    "/path/to/pi-atlas/extensions/askuser",
-    "/path/to/pi-atlas/extensions/target",
-    "/path/to/pi-atlas/extensions/bash-timeout",
-    "/path/to/pi-atlas/extensions/compact",
-    "/path/to/pi-atlas/extensions/websearch",
-    "/path/to/pi-atlas/extensions/guard"
+    "/path/to/pi-atlas/packages/base/extensions/task",
+    "/path/to/pi-atlas/packages/base/extensions/target",
+    "/path/to/pi-atlas/packages/base/extensions/guard",
+    "/path/to/pi-atlas/packages/base/extensions/bash-timeout",
+    "/path/to/pi-atlas/packages/base/extensions/compact",
+    "/path/to/pi-atlas/packages/ask/extensions/askuser",
+    "/path/to/pi-atlas/packages/extend/extensions/websearch"
   ]
 }
 ```
 
-> `guard` imports the `task` and `target` managers/guards, so install all three together.
+> `guard` imports the `task` and `target` managers/guards, so install all three together (they live in `@pi-atlas/base`).
 
 ### Configure
 

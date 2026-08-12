@@ -1,18 +1,36 @@
 # pi-atlas
 
-pi coding agent 的 TypeScript 扩展集合（task 异步任务管理 + askuser 用户交互 + target 目标管理 + guard 自动续跑）。
+pi coding agent 的 TypeScript 扩展集合，按 npm 子包拆分（同步版本、一起发布）：
+
+| 包 | 扩展 | 说明 |
+|----|------|------|
+| `@pi-atlas/base`（默认） | task, target, guard, bash-timeout, compact | 核心包：后台任务 + 目标管理 + 自动续跑 + 飞书通知 + 默认超时 + 压缩 |
+| `@pi-atlas/ask` | askuser | 用户交互提问 |
+| `@pi-atlas/extend` | websearch | 联网搜索 |
+| `pi-atlas`（meta） | 全部 | 全家桶，一个包装完 |
 
 ## 架构
 
 ```
-extensions/
-├── shared/
-│   └── atlas-paths.ts        # 所有扩展共享的路径辅助
-├── task/                     # 后台任务系统（create_bash / create_agent / await_task …）
-├── askuser/                  # ask_user 工具（select / input）
-├── target/                   # 目标管理（target 工具 + /goal 命令）
-└── guard/                    # agent_settled guard 协调器（task + target 优先级）+ 飞书通知
+packages/
+├── shared/                   # @pi-atlas/shared（非扩展包，纯库）
+│   ├── atlas-paths.ts        # 所有扩展共享的存储路径辅助
+│   ├── format-utils.ts       # 输出格式化工具
+│   └── target-state.ts       # Target 状态模型 + 只读加载（ask 包跨包读目标状态）
+├── base/
+│   └── extensions/
+│       ├── task/             # 后台任务系统（create_bash / create_agent / await_task …）
+│       ├── target/           # 目标管理（target 工具 + /goal 命令）
+│       ├── guard/            # agent_settled guard 协调器（task + target 优先级）+ 飞书通知
+│       ├── bash-timeout/     # 内置 bash 工具默认超时
+│       └── compact/          # 高质量会话压缩
+├── ask/
+│   └── extensions/askuser/   # ask_user 工具（select / input）
+└── extend/
+    └── extensions/websearch/ # WebSearch 工具
 ```
+
+`extensions/pi-acp-v2/`（仓库根，不进任何 npm 包）是独立 stdio server。包内相对路径互引（如 guard → ../task、compact → ../target）；跨包只允许依赖 `@pi-atlas/shared`。
 
 每个扩展导出 `default` 工厂函数 `(pi: ExtensionAPI) => void`，通过 `pi.registerTool()` 注册工具、`pi.on(event, handler)` 注册生命周期事件。
 
@@ -35,10 +53,10 @@ extensions/
 
 ### 路径辅助函数
 
-定义在 `extensions/shared/atlas-paths.ts`，所有扩展通过它获取存储路径：
+定义在 `packages/shared/atlas-paths.ts`（包名 `@pi-atlas/shared/atlas-paths.js`），所有扩展通过它获取存储路径：
 
 ```ts
-import { getAtlasDir, getAtlasSessionDir, getNotifyConfigPath, ENV_ATLAS_DIR } from "../shared/atlas-paths.js";
+import { getAtlasDir, getAtlasSessionDir, getNotifyConfigPath, ENV_ATLAS_DIR } from "@pi-atlas/shared/atlas-paths.js";
 
 getAtlasDir()                  // → ~/.pi/atlas/（基目录）
 getAtlasSessionDir(sessionId)  // → ~/.pi/atlas/sessions/<sessionId>/
@@ -51,9 +69,11 @@ getNotifyConfigPath()          // → ~/.pi/atlas/notify.json（全局飞书通�
 
 ### 新增扩展时的约定
 
-1. 用 `getAtlasSessionDir(sessionId)` 拿到 session 根目录，在其下创建自己的子目录。
-2. 不要直接使用 `getAgentDir()`（`~/.pi/agent/`）存放扩展数据——那是 pi 自身的配置目录。
-3. 测试时设置 `process.env.PI_ATLAS_DIR = <tmpDir>` 做隔离。
+1. 先决定归属包：核心协作类进 `packages/base/extensions/`，独立工具按需新建 `packages/<name>/extensions/`（同步版本，发布时用 `npm run release`）。
+2. 用 `getAtlasSessionDir(sessionId)` 拿到 session 根目录，在其下创建自己的子目录。
+3. 不要直接使用 `getAgentDir()`（`~/.pi/agent/`）存放扩展数据——那是 pi 自身的配置目录。
+4. 跨包只允许 import `@pi-atlas/shared/*`（含 `target-state.js` 的目标状态只读模型）；需要写目标状态时留在 base 包的 target 扩展内。
+5. 测试时设置 `process.env.PI_ATLAS_DIR = <tmpDir>` 做隔离。
 
 ## 测试
 
@@ -128,7 +148,7 @@ Escape (aborted)   → autoContinue=false（与 /goal off 相同；用户主动�
 
 ### 飞书通知（Feishu）
 
-实现见 `extensions/guard/notify.ts`，在两个时机发送精简卡片（pwd 末两段 + 「打开会话」按钮）：
+实现见 `packages/base/extensions/guard/notify.ts`，在两个时机发送精简卡片（pwd 末两段 + 「打开会话」按钮）：
 
 1. **ask_user**：监听 `tool_call`，`toolName === "ask_user"` 时通知（工具执行前触发，ask_user 阻塞 turn，与会话结束通知不冲突）。
 2. **会话结束**：`agent_settled` 中当 Escape / 后台任务 / auto-continue 三个 guard **均不注入**（即 auto-continue 未激活、无运行中任务、非中断）时通知——agent 真正交还控制权。

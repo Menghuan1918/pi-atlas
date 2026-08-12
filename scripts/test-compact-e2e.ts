@@ -3,7 +3,7 @@
  * Run: npx tsx scripts/test-compact-e2e.ts
  *
  * Proves the deployment integration that unit tests cannot: that pi discovers and
- * loads the compact extension (via the ~/.pi/agent/extensions/compact symlink),
+ * loads the compact extension (via the pi package manifest — see the packages/ layout),
  * invokes our session_before_compact handler on manual compaction, and persists
  * the returned result as a CompactionEntry with fromHook=true (i.e. OUR handler,
  * not pi's default). Uses the real session model (macaron) — needs network.
