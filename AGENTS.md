@@ -4,16 +4,16 @@ pi coding agent 的 TypeScript 扩展集合，按 npm 子包拆分（同步版�
 
 | 包 | 扩展 | 说明 |
 |----|------|------|
-| `@pi-atlas/base`（默认） | task, target, guard, bash-timeout, compact | 核心包：后台任务 + 目标管理 + 自动续跑 + 飞书通知 + 默认超时 + 压缩 |
-| `@pi-atlas/ask` | askuser | 用户交互提问 |
-| `@pi-atlas/extend` | websearch | 联网搜索 |
+| `pi-atlas-base`（默认） | task, target, guard, bash-timeout, compact | 核心包：后台任务 + 目标管理 + 自动续跑 + 飞书通知 + 默认超时 + 压缩 |
+| `pi-atlas-ask` | askuser | 用户交互提问 |
+| `pi-atlas-extend` | websearch | 联网搜索 |
 | `pi-atlas`（meta） | 全部 | 全家桶，一个包装完 |
 
 ## 架构
 
 ```
 packages/
-├── shared/                   # @pi-atlas/shared（非扩展包，纯库）
+├── shared/                   # pi-atlas-shared（非扩展包，纯库）
 │   ├── atlas-paths.ts        # 所有扩展共享的存储路径辅助
 │   ├── format-utils.ts       # 输出格式化工具
 │   └── target-state.ts       # Target 状态模型 + 只读加载（ask 包跨包读目标状态）
@@ -30,7 +30,7 @@ packages/
     └── extensions/websearch/ # WebSearch 工具
 ```
 
-`extensions/pi-acp-v2/`（仓库根，不进任何 npm 包）是独立 stdio server。包内相对路径互引（如 guard → ../task、compact → ../target）；跨包只允许依赖 `@pi-atlas/shared`。
+`extensions/pi-acp-v2/`（仓库根，不进任何 npm 包）是独立 stdio server。包内相对路径互引（如 guard → ../task、compact → ../target）；跨包只允许依赖 `pi-atlas-shared`。
 
 每个扩展导出 `default` 工厂函数 `(pi: ExtensionAPI) => void`，通过 `pi.registerTool()` 注册工具、`pi.on(event, handler)` 注册生命周期事件。
 
@@ -53,10 +53,10 @@ packages/
 
 ### 路径辅助函数
 
-定义在 `packages/shared/atlas-paths.ts`（包名 `@pi-atlas/shared/atlas-paths.js`），所有扩展通过它获取存储路径：
+定义在 `packages/shared/atlas-paths.ts`（包名 `pi-atlas-shared/atlas-paths.js`），所有扩展通过它获取存储路径：
 
 ```ts
-import { getAtlasDir, getAtlasSessionDir, getNotifyConfigPath, ENV_ATLAS_DIR } from "@pi-atlas/shared/atlas-paths.js";
+import { getAtlasDir, getAtlasSessionDir, getNotifyConfigPath, ENV_ATLAS_DIR } from "pi-atlas-shared/atlas-paths.js";
 
 getAtlasDir()                  // → ~/.pi/atlas/（基目录）
 getAtlasSessionDir(sessionId)  // → ~/.pi/atlas/sessions/<sessionId>/
@@ -72,7 +72,7 @@ getNotifyConfigPath()          // → ~/.pi/atlas/notify.json（全局飞书通�
 1. 先决定归属包：核心协作类进 `packages/base/extensions/`，独立工具按需新建 `packages/<name>/extensions/`（同步版本，发布时用 `npm run release`）。
 2. 用 `getAtlasSessionDir(sessionId)` 拿到 session 根目录，在其下创建自己的子目录。
 3. 不要直接使用 `getAgentDir()`（`~/.pi/agent/`）存放扩展数据——那是 pi 自身的配置目录。
-4. 跨包只允许 import `@pi-atlas/shared/*`（含 `target-state.js` 的目标状态只读模型）；需要写目标状态时留在 base 包的 target 扩展内。
+4. 跨包只允许 import `pi-atlas-shared/*`（含 `target-state.js` 的目标状态只读模型）；需要写目标状态时留在 base 包的 target 扩展内。
 5. 测试时设置 `process.env.PI_ATLAS_DIR = <tmpDir>` 做隔离。
 
 ## 测试

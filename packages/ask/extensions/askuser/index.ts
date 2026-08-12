@@ -19,7 +19,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum, Type, type Static } from "@earendil-works/pi-ai";
 import { loadTimeoutConfig, ensureDefaultConfig } from "./config";
 import { showMultiQuestion, type MultiQuestion } from "./multi-question";
-import { loadTargetState } from "@pi-atlas/shared/target-state.js";
+import { loadTargetState } from "pi-atlas-shared/target-state.js";
 
 /**
  * When goal-auto mode is active (user ran `/goal-auto`), the agent is

@@ -25,7 +25,7 @@ import {
 
 import { taskManager } from "./task-manager.js";
 import { resolveAgent, wrapPrompt, formatAgentCatalog, BUILTIN_AGENTS } from "./agents.js";
-import { getAgentSessionDir, getModelTiersPath } from "@pi-atlas/shared/atlas-paths.js";
+import { getAgentSessionDir, getModelTiersPath } from "pi-atlas-shared/atlas-paths.js";
 
 // ---------------------------------------------------------------------------
 // Constants

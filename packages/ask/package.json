@@ -1,5 +1,5 @@
 {
-  "name": "@pi-atlas/ask",
+  "name": "pi-atlas-ask",
   "version": "0.2.0",
   "description": "ask_user extension — ask the user questions (select/input) and block for answers, with goal-auto timeout capping.",
   "license": "MIT",
@@ -19,14 +19,11 @@
     ]
   },
   "dependencies": {
-    "@pi-atlas/shared": "0.2.0"
+    "pi-atlas-shared": "0.2.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

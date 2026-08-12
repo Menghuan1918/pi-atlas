@@ -1,5 +1,5 @@
 {
-  "name": "@pi-atlas/extend",
+  "name": "pi-atlas-extend",
   "version": "0.2.0",
   "description": "Optional pi-atlas extensions — WebSearch via an Anthropic-compatible provider.",
   "license": "MIT",
@@ -22,8 +22,5 @@
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

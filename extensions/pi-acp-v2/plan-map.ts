@@ -23,7 +23,7 @@
  * verified-reality.md §2.4. The STABLE form is `plan_update`/`plan_removed` with
  * a REQUIRED planId; no capability gating (baseline `session:{}` suffices).
  */
-import { TARGET_CHANGED_CHANNEL, type TargetState, type TargetStatus, type TargetItem } from "@pi-atlas/shared/target-state.js";
+import { TARGET_CHANGED_CHANNEL, type TargetState, type TargetStatus, type TargetItem } from "pi-atlas-shared/target-state.js";
 import type { SessionUpdate } from "@agentclientprotocol/sdk/experimental/v2";
 
 /** Channel the target extension emits TargetState changes on (shared contract). */

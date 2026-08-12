@@ -842,7 +842,7 @@ console.log("\nTest 13: resolveModelFromTier reads / creates model-tiers.json");
   process.env.PI_ATLAS_DIR = tempDir;
   process.env.PI_CODING_AGENT_DIR = tempDir;
 
-  const { getModelTiersPath } = await import("@pi-atlas/shared/atlas-paths.js");
+  const { getModelTiersPath } = await import("pi-atlas-shared/atlas-paths.js");
   const configPath = getModelTiersPath();
 
   // First call: config doesn't exist → auto-detect (may fall back to default)

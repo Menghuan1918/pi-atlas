@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { taskManager } from "../packages/base/extensions/task/index.js";
-import { getAtlasSessionDir } from "@pi-atlas/shared/atlas-paths.js";
+import { getAtlasSessionDir } from "pi-atlas-shared/atlas-paths.js";
 
 let pass = 0, fail = 0;
 function assert(c: unknown, m: string) { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail++; console.error(`  ✗ ${m}`); } }

@@ -1,8 +1,8 @@
 /**
  * Target state model + read helpers, shared across pi-atlas packages.
  *
- * Lives in `@pi-atlas/shared` so extensions outside the `base` package
- * (e.g. `@pi-atlas/ask`) can read the Target extension's persisted state
+ * Lives in `pi-atlas-shared` so extensions outside the `base` package
+ * (e.g. `pi-atlas-ask`) can read the Target extension's persisted state
  * without importing its code. Writes stay in the Target extension
  * (`packages/base/extensions/target/persistence.ts`).
  *

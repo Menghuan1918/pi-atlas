@@ -7,7 +7,7 @@
  * Writes are atomic: data is written to a temp file then renamed.
  *
  * The read path (`loadTargetState` / types / normalization) lives in
- * `@pi-atlas/shared/target-state.js` and is re-exported here so the compact
+ * `pi-atlas-shared/target-state.js` and is re-exported here so the compact
  * extension (same package) keeps importing from `./persistence.js`.
  */
 
@@ -17,14 +17,14 @@ import {
   ensureDir,
   getTargetDir,
   type TargetState,
-} from "@pi-atlas/shared/target-state.js";
+} from "pi-atlas-shared/target-state.js";
 
 // Re-export the shared read path for consumers inside the base package.
 export {
   getTargetDir,
   getStatePath,
   loadTargetState,
-} from "@pi-atlas/shared/target-state.js";
+} from "pi-atlas-shared/target-state.js";
 
 const STATE_FILE = "state.json";
 

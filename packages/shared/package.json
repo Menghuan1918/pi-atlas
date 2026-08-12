@@ -1,5 +1,5 @@
 {
-  "name": "@pi-atlas/shared",
+  "name": "pi-atlas-shared",
   "version": "0.2.0",
   "description": "Shared storage path helpers and target-state model for pi-atlas packages.",
   "license": "MIT",
@@ -15,8 +15,5 @@
   ],
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

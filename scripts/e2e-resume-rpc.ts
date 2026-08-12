@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import { taskManager } from "../packages/base/extensions/task/index.js";
 import { resumeTaskTool } from "../packages/base/extensions/task/agent-task.js";
-import { getAgentSessionDir } from "@pi-atlas/shared/atlas-paths.js";
+import { getAgentSessionDir } from "pi-atlas-shared/atlas-paths.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 let pass = 0, fail = 0;

@@ -21,7 +21,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
-import { getNotifyConfigPath } from "@pi-atlas/shared/atlas-paths.js";
+import { getNotifyConfigPath } from "pi-atlas-shared/atlas-paths.js";
 
 export interface NotifyConfig {
   enabled: boolean;

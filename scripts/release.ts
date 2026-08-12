@@ -5,7 +5,7 @@
  *   1. Verifies every package's version matches the root version.
  *   2. Bumps all package.json files to the next version.
  *   3. Publishes in dependency order:
- *        @pi-atlas/shared → (@pi-atlas/base, @pi-atlas/ask, @pi-atlas/extend) → pi-atlas (meta)
+ *        pi-atlas-shared → (pi-atlas-base, pi-atlas-ask, pi-atlas-extend) → pi-atlas (meta)
  *   4. Tags the release as v<version>.
  *
  * Usage:

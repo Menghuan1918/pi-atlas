@@ -42,7 +42,7 @@ import {
   toPlanRemoved,
   toPlanUpdate,
 } from "./plan-map.js";
-import type { TargetState } from "@pi-atlas/shared/target-state.js";
+import type { TargetState } from "pi-atlas-shared/target-state.js";
 import {
   ADAPTER_NAME,
   ADAPTER_TITLE,
