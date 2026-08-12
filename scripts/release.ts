@@ -14,6 +14,7 @@
  *   tsx scripts/release.ts minor
  *   tsx scripts/release.ts major
  *   tsx scripts/release.ts 0.3.0      # explicit version
+ *   tsx scripts/release.ts --dry-run  # preview only: versions + publish plan, no publish
  *
  * Requires npm login / a valid .npmrc token for the target registry.
  */
@@ -61,7 +62,9 @@ function run(cmd: string, cwd: string): void {
   execSync(cmd, { cwd, stdio: "inherit" });
 }
 
-const spec = process.argv[2] ?? "check";
+const args = process.argv.slice(2);
+const dryRun = args.includes("--dry-run");
+const spec = (args.find((a) => a !== "--dry-run") ?? "check") as string;
 
 // 1. Verify all versions are in sync.
 const versions = new Set<string>([readVersion(ROOT)]);
@@ -80,16 +83,29 @@ const current = readVersion(ROOT);
 let next = current;
 if (spec !== "check") {
   next = bumpVersion(current, spec);
-  console.log(`Bumping ${current} → ${next}`);
-  writeVersion(ROOT, next);
-  for (const p of PACKAGES) writeVersion(join(ROOT, "packages", p), next);
-  // Keep the lockfile in sync with the new version.
-  run(`npm install --package-lock-only`, ROOT);
+  if (dryRun) {
+    console.log(`[dry-run] would bump ${current} → ${next}`);
+  } else {
+    console.log(`Bumping ${current} → ${next}`);
+    writeVersion(ROOT, next);
+    for (const p of PACKAGES) writeVersion(join(ROOT, "packages", p), next);
+    // Keep the lockfile in sync with the new version.
+    run(`npm install --package-lock-only`, ROOT);
+  }
 } else {
   console.log(`Versions in sync at ${current}. Use \`tsx scripts/release.ts patch|minor|major\` to bump.`);
 }
 
 // 3. Publish in dependency order.
+if (dryRun) {
+  console.log("[dry-run] publish plan:");
+  for (const { dir } of PUBLISH_ORDER) {
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+    console.log(`  npm publish  →  ${pkg.name}@${next}`);
+  }
+  console.log(`[dry-run] tag: ${next !== current ? `v${next}` : "(no version change — no tag)"}`);
+  process.exit(0);
+}
 for (const { dir } of PUBLISH_ORDER) {
   run(`npm publish`, dir);
 }
