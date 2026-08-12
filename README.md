@@ -24,7 +24,7 @@ The whole loop is event-driven: it rides on pi's lifecycle events (`tool_call`, 
 
 ## Extensions at a glance
 
-pi-atlas is a collection of independent pi extensions, split into npm packages so you can install only what you need. All packages share one version number (published together). Each extension is a self-contained directory under `extensions/` inside its package. They share a single runtime data root at `~/.pi/atlas/` (overridable via `PI_ATLAS_DIR`), scoped per session under `~/.pi/atlas/sessions/<sessionId>/`.
+pi-atlas is a collection of independent pi extensions, split into npm packages so you can install only what you need. All packages share one version number (published together). Each extension is a self-contained directory under `extensions/` inside its package (`packages/<name>/extensions/<ext>/`). They share a single runtime data root at `~/.pi/atlas/` (overridable via `PI_ATLAS_DIR`), scoped per session under `~/.pi/atlas/sessions/<sessionId>/`.
 
 | Package | Extension | Type | What it does |
 |---------|-----------|------|--------------|
@@ -268,7 +268,17 @@ npm run typecheck   # tsc --noEmit
 npm test            # run all test suites
 ```
 
-Tests live in `verify/` and `scripts/` and run directly via `tsx` (no test framework). Project structure mirrors the extension directories under `extensions/`.
+Tests live in `verify/` and `scripts/` and run directly via `tsx` (no test framework). Project structure mirrors the npm packages under `packages/` (each package: `package.json` + `extensions/<name>/`).
+
+**Releasing** (all packages share one version — synchronized by the script):
+
+```bash
+npm run release            # version check + publish (no bump)
+npm run release -- patch   # bump patch, then publish
+npm run release -- minor   # bump minor, then publish
+```
+
+Publish order is dependency-first: `@pi-atlas/shared` → (`@pi-atlas/base`, `@pi-atlas/ask`, `@pi-atlas/extend`) → `pi-atlas` (meta). The script verifies all versions match, tags the release as `v<version>`, and leaves `git push --tags` to you.
 
 ## License
 
