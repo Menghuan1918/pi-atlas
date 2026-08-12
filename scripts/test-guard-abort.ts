@@ -13,8 +13,8 @@
  *
  * Run: npx tsx scripts/test-guard-abort.ts
  */
-import { taskManager } from "../extensions/task/index.js";
-import { createGuardHandler } from "../extensions/task/guard.js";
+import { taskManager } from "../packages/base/extensions/task/index.js";
+import { createGuardHandler } from "../packages/base/extensions/task/guard.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 let pass = 0;

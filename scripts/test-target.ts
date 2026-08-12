@@ -18,10 +18,10 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { targetManager } from "../extensions/target/target-manager.js";
-import { createTargetGuardHandler, wasLastTurnAborted } from "../extensions/target/guard.js";
-import { loadTargetState, getStatePath } from "../extensions/target/persistence.js";
-import { taskManager } from "../extensions/task/task-manager.js";
+import { targetManager } from "../packages/base/extensions/target/target-manager.js";
+import { createTargetGuardHandler, wasLastTurnAborted } from "../packages/base/extensions/target/guard.js";
+import { loadTargetState, getStatePath } from "../packages/base/extensions/target/persistence.js";
+import { taskManager } from "../packages/base/extensions/task/task-manager.js";
 
 let pass = 0;
 let fail = 0;

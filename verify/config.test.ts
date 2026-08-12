@@ -11,7 +11,7 @@ import {
 	ensureDefaultConfig,
 	getAskUserConfigPath,
 	getAskUserConfigDir,
-} from "../extensions/askuser/config";
+} from "../packages/ask/extensions/askuser/config";
 
 let pass = 0;
 let fail = 0;

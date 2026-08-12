@@ -3,7 +3,7 @@
  * Run: npx tsx verify/bash-timeout.test.ts
  */
 
-import { isSearchCommand } from "../extensions/bash-timeout/detect";
+import { isSearchCommand } from "../packages/base/extensions/bash-timeout/detect";
 
 let pass = 0;
 let fail = 0;

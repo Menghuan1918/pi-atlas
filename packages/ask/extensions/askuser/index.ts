@@ -19,7 +19,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum, Type, type Static } from "@earendil-works/pi-ai";
 import { loadTimeoutConfig, ensureDefaultConfig } from "./config";
 import { showMultiQuestion, type MultiQuestion } from "./multi-question";
-import { targetManager } from "../target/target-manager.js";
+import { loadTargetState } from "@pi-atlas/shared/target-state.js";
 
 /**
  * When goal-auto mode is active (user ran `/goal-auto`), the agent is
@@ -32,6 +32,17 @@ import { targetManager } from "../target/target-manager.js";
  * user when it needs input.
  */
 const GOAL_ACTIVE_TIMEOUT_CAP_S = 60;
+
+/**
+ * True when goal-auto mode is active for the session (user ran `/goal-auto`):
+ * autoContinue is on AND the ask_user timeout cap applies. Read from the
+ * Target extension's persisted state (via the shared package) — the ask
+ * package deliberately does not import the target extension's code.
+ */
+async function isAskUserTimeoutCapped(sessionId: string): Promise<boolean> {
+  const state = await loadTargetState(sessionId).catch(() => null);
+  return state?.autoContinue === true && state.askUserTimeoutCap === true;
+}
 
 const AskUserSchema = Type.Object({
 	questions: Type.Array(
@@ -130,7 +141,7 @@ export default function askUserExtension(pi: ExtensionAPI): void {
 			// ever *lowers* the configured timeout: 0 (infinite) → 60s, and any
 			// config > 60 → 60s; a shorter configured timeout (e.g. 30s) is left
 			// untouched. In goal mode (`/goal` or agent-set primary) no cap applies.
-			if (targetManager.isAskUserTimeoutCapped(sid)) {
+			if (await isAskUserTimeoutCapped(sid)) {
 				timeoutSeconds = Math.min(
 					timeoutSeconds > 0 ? timeoutSeconds : Infinity,
 					GOAL_ACTIVE_TIMEOUT_CAP_S,

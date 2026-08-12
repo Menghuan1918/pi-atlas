@@ -1,0 +1,19 @@
+{
+  "name": "@pi-atlas/shared",
+  "version": "0.2.0",
+  "description": "Shared storage path helpers and target-state model for pi-atlas packages.",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "*.ts"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "pi-atlas"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

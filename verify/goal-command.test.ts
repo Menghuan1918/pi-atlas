@@ -14,8 +14,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import targetExtension from "../extensions/target/index.js";
-import { targetManager } from "../extensions/target/target-manager.js";
+import targetExtension from "../packages/base/extensions/target/index.js";
+import { targetManager } from "../packages/base/extensions/target/target-manager.js";
 
 let pass = 0;
 let fail = 0;

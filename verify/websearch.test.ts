@@ -10,8 +10,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import webSearchExtension from "../extensions/websearch/index";
-import { resolveMacaronConfig } from "../extensions/websearch/search";
+import webSearchExtension from "../packages/extend/extensions/websearch/index";
+import { resolveMacaronConfig } from "../packages/extend/extensions/websearch/search";
 
 let pass = 0;
 let fail = 0;

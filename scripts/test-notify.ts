@@ -17,7 +17,7 @@ import {
   loadNotifyConfig,
   notify,
   sign,
-} from "../extensions/guard/notify.js";
+} from "../packages/base/extensions/guard/notify.js";
 
 let pass = 0;
 let fail = 0;

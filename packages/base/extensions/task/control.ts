@@ -17,7 +17,7 @@ import {
 
 import { taskManager } from "./task-manager.js";
 import type { Task, TaskResult, TaskStatus } from "./types.js";
-import { formatDuration } from "../shared/format-utils.js";
+import { formatDuration } from "@pi-atlas/shared/format-utils.js";
 
 const DEFAULT_AWAIT_TIMEOUT_S = 3600;
 

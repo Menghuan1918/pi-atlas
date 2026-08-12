@@ -14,16 +14,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 
-import { runCompaction } from "../extensions/compact/index.js";
+import { runCompaction } from "../packages/base/extensions/compact/index.js";
 import {
 	buildAuxiliaryText,
 	buildSystemPrompt,
 	fileListsFromOps,
 	formatTargets,
 	isDegenerateSummary,
-} from "../extensions/compact/summarize.js";
-import { getStatePath } from "../extensions/target/persistence.js";
-import type { TargetState } from "../extensions/target/types.js";
+} from "../packages/base/extensions/compact/summarize.js";
+import { getStatePath } from "../packages/base/extensions/target/persistence.js";
+import type { TargetState } from "../packages/base/extensions/target/types.js";
 
 let pass = 0;
 let fail = 0;

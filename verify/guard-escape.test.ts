@@ -18,8 +18,8 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { targetManager } from "../extensions/target/target-manager.js";
-import { createTargetGuardHandler } from "../extensions/target/guard.js";
+import { targetManager } from "../packages/base/extensions/target/target-manager.js";
+import { createTargetGuardHandler } from "../packages/base/extensions/target/guard.js";
 
 let pass = 0;
 let fail = 0;

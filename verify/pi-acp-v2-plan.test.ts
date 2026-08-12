@@ -21,8 +21,8 @@ import {
   toPlanRemoved,
   toPlanUpdate,
 } from "../extensions/pi-acp-v2/plan-map.js";
-import { targetManager } from "../extensions/target/target-manager.js";
-import { defaultTargetState, type TargetState } from "../extensions/target/types.js";
+import { targetManager } from "../packages/base/extensions/target/target-manager.js";
+import { defaultTargetState, type TargetState } from "../packages/base/extensions/target/types.js";
 
 let pass = 0;
 let fail = 0;

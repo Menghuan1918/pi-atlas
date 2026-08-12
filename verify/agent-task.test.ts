@@ -9,7 +9,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { TaskManager, taskManager } from "../extensions/task/index.js";
+import { TaskManager, taskManager } from "../packages/base/extensions/task/index.js";
 import {
   extractFinalOutput,
   extractLastAction,
@@ -18,9 +18,9 @@ import {
   MAX_AGENT_DEPTH,
   resolveModelFromTier,
   parseModelPatternFromListOutput,
-} from "../extensions/task/agent-task.js";
-import { resolveAgent, wrapPrompt, formatAgentCatalog, BUILTIN_AGENTS } from "../extensions/task/agents.js";
-import * as persistence from "../extensions/task/persistence.js";
+} from "../packages/base/extensions/task/agent-task.js";
+import { resolveAgent, wrapPrompt, formatAgentCatalog, BUILTIN_AGENTS } from "../packages/base/extensions/task/agents.js";
+import * as persistence from "../packages/base/extensions/task/persistence.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 let pass = 0;
@@ -341,7 +341,7 @@ console.log("\nTest 5: CreateAgent nesting depth check");
   taskManager.setSessionDepth(sessionId, MAX_AGENT_DEPTH);
 
   // Dynamically import the tool to call execute.
-  const { createAgentTool } = await import("../extensions/task/agent-task.js");
+  const { createAgentTool } = await import("../packages/base/extensions/task/agent-task.js");
 
   const ctx = makeCtx(sessionId, sessionDir);
 
@@ -373,7 +373,7 @@ console.log("\nTest 6: CreateAgent rejects empty prompt");
   const sessionId = "empty-session";
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-empty-sess-"));
 
-  const { createAgentTool } = await import("../extensions/task/agent-task.js");
+  const { createAgentTool } = await import("../packages/base/extensions/task/agent-task.js");
   const ctx = makeCtx(sessionId, sessionDir);
 
   const result = await createAgentTool.execute(
@@ -407,7 +407,7 @@ console.log("\nTest 7: ResumeTask rejects bash tasks");
   const bashTask = taskManager.createBashTask(sessionId, "echo done", process.cwd());
   await taskManager.awaitTasks(sessionId, [bashTask.id], 10000);
 
-  const { resumeTaskTool } = await import("../extensions/task/agent-task.js");
+  const { resumeTaskTool } = await import("../packages/base/extensions/task/agent-task.js");
   const ctx = makeCtx(sessionId, sessionDir);
 
   const result = await resumeTaskTool.execute(
@@ -441,7 +441,7 @@ console.log("\nTest 8: ResumeTask rejects non-existent and running tasks");
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-resume-misc-sess-"));
 
   const tm = taskManager; // use singleton (the tool reads from it)
-  const { resumeTaskTool } = await import("../extensions/task/agent-task.js");
+  const { resumeTaskTool } = await import("../packages/base/extensions/task/agent-task.js");
   const ctx = makeCtx(sessionId, sessionDir);
 
   // Non-existent task
@@ -514,7 +514,7 @@ console.log("\nTest 9: ResumeTask restores session via --session (not output inj
     assert(parentFinal.sessionFile !== undefined, "parent sessionFile is set");
 
     // Resume via the tool
-    const { resumeTaskTool } = await import("../extensions/task/agent-task.js");
+    const { resumeTaskTool } = await import("../packages/base/extensions/task/agent-task.js");
     const ctx = makeCtx(sessionId, sessionDir);
     const resumeResult = await resumeTaskTool.execute(
       "tc1",
@@ -737,7 +737,7 @@ console.log("\nTest 12c: formatAgentCatalog lists all built-in agents");
 
 console.log("\nTest 12d: CreateAgent description has agent catalog");
 {
-  const { createAgentTool } = await import("../extensions/task/agent-task.js");
+  const { createAgentTool } = await import("../packages/base/extensions/task/agent-task.js");
   assert(createAgentTool.description.includes("Available agents:"), "description has Available agents header");
   assert(createAgentTool.description.includes("explorer:"), "description lists explorer");
   assert(createAgentTool.description.includes("code-reviewer:"), "description lists code-reviewer");
@@ -757,7 +757,7 @@ console.log("\nTest 12e: CreateAgent not-found error lists available agents");
   const sessionDir = mkdtempSync(join(tmpdir(), "pi-agent-notfound-sess-"));
   taskManager.setSessionDepth(sessionId, 0);
 
-  const { createAgentTool } = await import("../extensions/task/agent-task.js");
+  const { createAgentTool } = await import("../packages/base/extensions/task/agent-task.js");
   const ctx = makeCtx(sessionId, sessionDir);
 
   const result = await createAgentTool.execute(
@@ -842,7 +842,7 @@ console.log("\nTest 13: resolveModelFromTier reads / creates model-tiers.json");
   process.env.PI_ATLAS_DIR = tempDir;
   process.env.PI_CODING_AGENT_DIR = tempDir;
 
-  const { getModelTiersPath } = await import("../extensions/shared/atlas-paths.js");
+  const { getModelTiersPath } = await import("@pi-atlas/shared/atlas-paths.js");
   const configPath = getModelTiersPath();
 
   // First call: config doesn't exist → auto-detect (may fall back to default)

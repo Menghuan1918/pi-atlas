@@ -10,7 +10,7 @@
 
 import { mkdir, rename, readFile, writeFile, access, constants, symlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { getAtlasSessionDir } from "../shared/atlas-paths.js";
+import { getAtlasSessionDir } from "@pi-atlas/shared/atlas-paths.js";
 import type { Task } from "./types.js";
 
 const TASKS_FILE = "tasks.json";

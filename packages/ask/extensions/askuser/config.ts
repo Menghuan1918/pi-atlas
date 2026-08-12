@@ -17,7 +17,7 @@
 
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getAtlasSessionDir } from "../shared/atlas-paths.js";
+import { getAtlasSessionDir } from "@pi-atlas/shared/atlas-paths.js";
 
 const CONFIG_FILENAME = "config.json";
 

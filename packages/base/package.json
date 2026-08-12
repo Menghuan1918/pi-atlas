@@ -1,0 +1,32 @@
+{
+  "name": "@pi-atlas/base",
+  "version": "0.2.0",
+  "description": "Core pi-atlas extensions — background tasks, goal/target management with auto-continue, bash timeouts, session compaction, and Feishu notifications.",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "extensions"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "extensions",
+    "automation",
+    "sre"
+  ],
+  "pi": {
+    "extensions": [
+      "extensions/*/index.ts"
+    ]
+  },
+  "dependencies": {
+    "@pi-atlas/shared": "0.2.0",
+    "shell-quote": "^1.10.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}

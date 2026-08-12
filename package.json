@@ -1,8 +1,8 @@
 {
   "name": "pi-atlas",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Event-driven coding extensions for the pi agent — async tasks, goal-driven auto-continue, and Feishu notifications for unattended infra/SRE runs.",
+  "description": "Event-driven coding extensions for the pi agent — async tasks, goal-driven auto-continue, and Feishu notifications for unattended infra/SRE runs. Meta package: installs every pi-atlas extension.",
   "keywords": [
     "pi-package",
     "pi",
@@ -19,9 +19,13 @@
     "url": "https://github.com/Menghuan1918/pi-atlas.git"
   },
   "homepage": "https://github.com/Menghuan1918/pi-atlas#readme",
+  "workspaces": [
+    "packages/*"
+  ],
   "files": [
-    "extensions",
-    "!extensions/pi-acp-v2",
+    "packages/base/extensions",
+    "packages/ask/extensions",
+    "packages/extend/extensions",
     "docs",
     "README.md",
     "README_CN.md",
@@ -29,14 +33,19 @@
     "LICENSE"
   ],
   "pi": {
-    "extensions": ["extensions/*/index.ts"]
+    "extensions": [
+      "packages/base/extensions/*/index.ts",
+      "packages/ask/extensions/*/index.ts",
+      "packages/extend/extensions/*/index.ts"
+    ]
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/test-smoke.ts && tsx scripts/test-guard-abort.ts && tsx scripts/test-notify.ts && tsx scripts/test-target.ts && tsx verify/config.test.ts && tsx verify/askuser.test.ts && tsx verify/agent-task.test.ts && tsx verify/bash-timeout.test.ts && tsx verify/compact.test.ts && tsx verify/websearch.test.ts && tsx verify/target.test.ts && tsx verify/format-output.test.ts && tsx verify/guard-escape.test.ts && tsx verify/pi-acp-v2-mapping.test.ts && tsx verify/pi-acp-v2-message-map.test.ts && tsx verify/pi-acp-v2-plan.test.ts && tsx verify/pi-acp-v2-ask-user.test.ts && tsx verify/pi-acp-v2-fork-rewind.test.ts && tsx scripts/test-pi-acp-v2.ts"
+    "test": "tsx scripts/test-smoke.ts && tsx scripts/test-guard-abort.ts && tsx scripts/test-notify.ts && tsx scripts/test-target.ts && tsx verify/config.test.ts && tsx verify/askuser.test.ts && tsx verify/agent-task.test.ts && tsx verify/bash-timeout.test.ts && tsx verify/compact.test.ts && tsx verify/websearch.test.ts && tsx verify/target.test.ts && tsx verify/format-output.test.ts && tsx verify/guard-escape.test.ts && tsx verify/pi-acp-v2-mapping.test.ts && tsx verify/pi-acp-v2-message-map.test.ts && tsx verify/pi-acp-v2-plan.test.ts && tsx verify/pi-acp-v2-ask-user.test.ts && tsx verify/pi-acp-v2-fork-rewind.test.ts && tsx scripts/test-pi-acp-v2.ts",
+    "release": "tsx scripts/release.ts"
   },
   "dependencies": {
-    "shell-quote": "^1.10.0"
+    "@pi-atlas/shared": "0.2.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

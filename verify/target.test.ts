@@ -13,9 +13,9 @@ import { join } from "node:path";
 import { rmSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { targetManager } from "../extensions/target/target-manager.js";
-import { targetTool } from "../extensions/target/tool.js";
-import { getStatePath } from "../extensions/target/persistence.js";
+import { targetManager } from "../packages/base/extensions/target/target-manager.js";
+import { targetTool } from "../packages/base/extensions/target/tool.js";
+import { getStatePath } from "../packages/base/extensions/target/persistence.js";
 
 let pass = 0;
 let fail = 0;

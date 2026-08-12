@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 
-import { TaskManager, taskManager, awaitTaskTool } from "../extensions/task/index.js";
+import { TaskManager, taskManager, awaitTaskTool } from "../packages/base/extensions/task/index.js";
 
 let pass = 0;
 let fail = 0;
@@ -127,7 +127,7 @@ console.log("\nTest 5: WatchTask returns type, timing, usage");
 console.log("\nTest 6: Target list with progress summary");
 {
   // Import target manager
-  const { targetManager } = await import("../extensions/target/target-manager.js");
+  const { targetManager } = await import("../packages/base/extensions/target/target-manager.js");
   const sid = "target-fmt-test";
   await targetManager.setPrimary(sid, "Test primary");
   await targetManager.addSecondary(sid, "Task A");

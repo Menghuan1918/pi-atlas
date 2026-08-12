@@ -7,9 +7,9 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { taskManager, TaskManager } from "../extensions/task/index.js";
-import * as persistence from "../extensions/task/persistence.js";
-import { createGuardHandler } from "../extensions/task/guard.js";
+import { taskManager, TaskManager } from "../packages/base/extensions/task/index.js";
+import * as persistence from "../packages/base/extensions/task/persistence.js";
+import { createGuardHandler } from "../packages/base/extensions/task/guard.js";
 
 let pass = 0;
 let fail = 0;

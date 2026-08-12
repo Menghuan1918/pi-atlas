@@ -38,8 +38,8 @@ import {
   type FakeScript,
 } from "../extensions/pi-acp-v2/fake-model.js";
 import { askUserExcludeToolsResolver, clientDeclares, VENDOR_CAPABILITIES } from "../extensions/pi-acp-v2/types.js";
-import targetExtension, { targetManager } from "../extensions/target/index.js";
-import askUserExtension from "../extensions/askuser/index.js";
+import targetExtension, { targetManager } from "../packages/base/extensions/target/index.js";
+import askUserExtension from "../packages/ask/extensions/askuser/index.js";
 
 let pass = 0;
 let fail = 0;

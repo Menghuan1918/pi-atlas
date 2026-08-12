@@ -10,9 +10,9 @@
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import askUserExtension from "../extensions/askuser/index";
-import { getAskUserConfigPath } from "../extensions/askuser/config";
-import { targetManager } from "../extensions/target/target-manager.js";
+import askUserExtension from "../packages/ask/extensions/askuser/index";
+import { getAskUserConfigPath } from "../packages/ask/extensions/askuser/config";
+import { targetManager } from "../packages/base/extensions/target/target-manager.js";
 
 let pass = 0;
 let fail = 0;

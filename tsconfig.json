@@ -16,5 +16,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["extensions/**/*.ts", "verify/**/*.ts", "scripts/**/*.ts"]
+  "include": ["packages/**/*.ts", "verify/**/*.ts", "scripts/**/*.ts", "extensions/pi-acp-v2/**/*.ts"]
 }

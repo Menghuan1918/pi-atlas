@@ -1,0 +1,26 @@
+{
+  "name": "@pi-atlas/extend",
+  "version": "0.2.0",
+  "description": "Optional pi-atlas extensions — WebSearch via an Anthropic-compatible provider.",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "extensions"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "extensions",
+    "websearch"
+  ],
+  "pi": {
+    "extensions": [
+      "extensions/*/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
